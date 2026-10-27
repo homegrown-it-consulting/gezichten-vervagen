@@ -226,12 +226,20 @@ input[type=range] { accent-color: var(--accent); }
 .box.is-blur { border-color: var(--blur); background: var(--blur-bg); }
 .box.is-blur:hover { background: rgba(244,63,94,.25); }
 .box.hl { box-shadow: 0 0 0 3px rgba(255,255,255,.75); }
+.box.sel { box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+/* × sits on the TOP-CENTRE of the ellipse: that point is inside the rounded
+   hit area, so moving the pointer onto it never "leaves" the box (a corner
+   position fell in the transparent rounded-off corner and lost the hover). */
 .box .x {
-  position: absolute; top: -9px; right: -9px; width: 18px; height: 18px; border-radius: 50%;
-  border: none; background: #1f2a44; color: var(--sub); font-size: 11px; line-height: 18px; display: none;
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25);
+  background: #1f2a44; color: var(--text); font-size: 13px; line-height: 20px; padding: 0;
+  display: none; z-index: 2;
 }
-.box:hover .x { display: block; }
+.box:hover .x, .box.sel .x { display: block; }
 .box .x:hover { background: var(--blur); color: #fff; }
+/* touch screens: a slightly bigger target, shown on the tapped (selected) box */
+@media (pointer: coarse) { .box .x { width: 30px; height: 30px; top: -16px; line-height: 28px; font-size: 16px; } }
 .draft { position: absolute; border: 2px dashed #fff; border-radius: 50% / 46%; pointer-events: none; background: rgba(255,255,255,.08); }
 .photo-wrap.preview { cursor: default; }
 .photo-wrap.preview .box { display: none; }
@@ -389,7 +397,7 @@ footer .r { margin-left: auto; }
       </div>
       <span class="spacer"></span>
       <span class="hint-line" id="hint-grid" data-i18n-html="hint_grid">Klik op een gezicht om het te vervagen.</span>
-      <span class="hint-line hidden" id="hint-photo" data-i18n-html="hint_photo">Klik = vervagen · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld</span>
+      <span class="hint-line hidden" id="hint-photo" data-i18n-html="hint_photo">Klik = vervagen · × of <kbd>Del</kbd> = kader weg · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld</span>
       <label class="size-ctl" id="size-ctl"><span>⊟</span><input type="range" id="thumb-size" min="72" max="200" value="112"><span>⊞</span></label>
       <button class="btn sm primary" id="btn-to-export" data-i18n="btn_to_export">Naar exporteren →</button>
     </div>
@@ -526,7 +534,7 @@ const I18N = {
     v_grid: 'Gezichtenraster', v_photo: 'Per foto',
     f_all: 'Alle', f_blur: 'Vervaagd', f_open: 'Zichtbaar', f_low: 'Twijfelgevallen', f_manual: 'Handmatig',
     hint_grid: 'Klik op een gezicht om het te vervagen.',
-    hint_photo: 'Klik = vervagen · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld',
+    hint_photo: 'Klik = vervagen · × of <kbd>Del</kbd> = kader weg · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld',
     btn_to_export: 'Naar exporteren →',
     btn_all_blur: 'Alles vervagen', btn_none_blur: 'Niets vervagen', btn_preview: 'Voorbeeld tonen', btn_preview_off: 'Kaders tonen',
     no_photo: 'Geen foto geselecteerd',
@@ -588,7 +596,7 @@ const I18N = {
     v_grid: 'Face grid', v_photo: 'Per photo',
     f_all: 'All', f_blur: 'Blurred', f_open: 'Visible', f_low: 'Uncertain', f_manual: 'Manual',
     hint_grid: 'Click a face to blur it.',
-    hint_photo: 'Click = blur · drag = add a missed face · <kbd>←</kbd><kbd>→</kbd> photo · <kbd>V</kbd> preview',
+    hint_photo: 'Click = blur · × or <kbd>Del</kbd> = remove box · drag = add a missed face · <kbd>←</kbd><kbd>→</kbd> photo · <kbd>V</kbd> preview',
     btn_to_export: 'Go to export →',
     btn_all_blur: 'Blur all', btn_none_blur: 'Blur none', btn_preview: 'Show preview', btn_preview_off: 'Show boxes',
     no_photo: 'No photo selected',
@@ -1036,7 +1044,7 @@ function renderStageMeta() {
   $('#btn-next').setAttribute('aria-label', t('next'));
 }
 function boxHtml(f) {
-  const cls = ['box', f.blur && 'is-blur', f.source === 'manual' && 'is-manual'].filter(Boolean).join(' ');
+  const cls = ['box', f.blur && 'is-blur', f.source === 'manual' && 'is-manual', f.id === selectedFid && 'sel'].filter(Boolean).join(' ');
   return `<div class="${cls}" data-f="${f.id}" style="left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%"><button class="x" data-del="${f.id}" aria-label="remove">×</button></div>`;
 }
 async function renderStage() {
@@ -1048,6 +1056,7 @@ async function renderStage() {
   let src = p.previewUrl;
   if (state.previewMode) src = await renderEffectPreview(p) || p.previewUrl;
   if (curPhoto() !== p) return; // user moved on during async render
+  if (!p.faces.some(f => f.id === selectedFid)) selectedFid = null;
   stage.innerHTML = `<div class="photo-wrap${state.previewMode ? ' preview' : ''}" id="photo-wrap"><img src="${src}" alt="">${p.faces.map(boxHtml).join('')}</div>`;
   $$('#strip .strip-item').forEach((el, i) => el.classList.toggle('active', i === state.current));
   const act = document.getElementById('st-' + p.id); if (act) act.scrollIntoView({ block: 'nearest' });
@@ -1487,24 +1496,39 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') { e.preventDefault(); $('#btn-prev').click(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); $('#btn-next').click(); }
   else if (e.key.toLowerCase() === 'v') { $('#btn-preview').click(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFid && curPhoto()) { e.preventDefault(); deleteFace(curPhoto(), selectedFid); }
+  else if (e.key === 'Escape') selectBox(null);
 });
 
-// stage: click box = toggle, × = delete, drag on empty area = new manual box
+// stage: click box = toggle + select, × (or Delete key) = remove, drag on empty area = new manual box
 let drag = null;
+let selectedFid = null;
+function selectBox(fid) {
+  selectedFid = fid;
+  $$('#photo-wrap .box').forEach(b => b.classList.toggle('sel', b.dataset.f === fid));
+}
+function deleteFace(p, fid) {
+  p.faces = p.faces.filter(f => f.id !== fid);
+  if (selectedFid === fid) selectedFid = null;
+  state.dirty = true;
+  const el = document.querySelector(`#photo-wrap .box[data-f="${fid}"]`);
+  if (el) el.remove();
+  renderSection(p); renderStripItem(p); recalc();
+  if (state.previewMode) renderStage();
+}
 $('#stage').addEventListener('pointerdown', e => {
   const wrap = e.target.closest('#photo-wrap');
   if (!wrap || state.previewMode || e.button !== 0) return;
   const p = curPhoto(); if (!p) return;
   const del = e.target.closest('[data-del]');
-  if (del) {
-    e.stopPropagation();
-    p.faces = p.faces.filter(f => f.id !== del.dataset.del);
-    state.dirty = true;
-    renderStage(); renderSection(p); renderStripItem(p); recalc();
+  if (del) { e.stopPropagation(); e.preventDefault(); deleteFace(p, del.dataset.del); return; }
+  const box = e.target.closest('.box');
+  if (box) {
+    const f = p.faces.find(x => x.id === box.dataset.f);
+    if (f) { toggleFace(p, f); selectBox(f.id); }
     return;
   }
-  const box = e.target.closest('.box');
-  if (box) { const f = p.faces.find(x => x.id === box.dataset.f); if (f) toggleFace(p, f); return; }
+  selectBox(null);
   const r = wrap.getBoundingClientRect();
   drag = { wrap, r, x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height, el: document.createElement('div') };
   drag.el.className = 'draft'; wrap.appendChild(drag.el);
