@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gezichten Vervagen</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1424'/%3E%3Cg fill='%2306b6d4'%3E%3Crect x='8' y='8' width='5' height='5'/%3E%3Crect x='19' y='8' width='5' height='5' opacity='.6'/%3E%3Crect x='13.5' y='13.5' width='5' height='5' opacity='.8'/%3E%3Crect x='8' y='19' width='5' height='5' opacity='.5'/%3E%3Crect x='19' y='19' width='5' height='5'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   Gezichten Vervagen — offline face blur review tool
+   Detection only (SSD MobileNet v1 via face-api, MIT).
+   No recognition model is bundled; nothing leaves the browser.
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0b1120;
+  --bg2: #0d1424;
+  --surface: #111a2e;
+  --surface2: #16213a;
+  --border: rgba(59,130,246,.16);
+  --border2: rgba(6,182,212,.32);
+  --text: #e5e9f2;
+  --sub: #8b95a9;
+  --dim: #5b6477;
+  --accent: #06b6d4;
+  --accent2: #3b82f6;
+  --blur: #f43f5e;          /* "wordt vervaagd" */
+  --blur-bg: rgba(244,63,94,.14);
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --radius: 10px;
+  --thumb: 112px;
+  --mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+}
+html, body { height: 100%; }
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(59,130,246,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.hidden { display: none !important; }
+.mono { font-family: var(--mono); }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: relative; z-index: 10; flex-shrink: 0;
+  display: flex; align-items: center; gap: 1.25rem;
+  height: 56px; padding: 0 1.25rem;
+  background: rgba(13,20,36,.92); border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.brand { display: flex; align-items: center; gap: .6rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.brand svg { width: 26px; height: 26px; filter: drop-shadow(0 0 10px rgba(6,182,212,.35)); }
+.brand small { display: block; font-weight: 500; font-size: .68rem; color: var(--sub); letter-spacing: .04em; }
+.steps { display: flex; gap: .25rem; margin-left: .75rem; }
+.step-btn {
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: .4rem .75rem; color: var(--sub); font-size: .82rem; font-weight: 600;
+  display: flex; align-items: center; gap: .45rem; transition: color .15s, border-color .15s, background .15s;
+}
+.step-btn .n { font-family: var(--mono); font-size: .7rem; color: var(--dim); }
+.step-btn:hover:not(:disabled) { color: var(--text); }
+.step-btn.active { color: var(--text); border-color: var(--border2); background: rgba(6,182,212,.08); }
+.step-btn.active .n { color: var(--accent); }
+.step-btn:disabled { opacity: .35; cursor: not-allowed; }
+.stats { margin-left: auto; display: flex; gap: 1.1rem; font-family: var(--mono); font-size: .74rem; color: var(--sub); white-space: nowrap; }
+.stats b { color: var(--text); font-weight: 600; }
+.stats .s-blur b { color: var(--blur); }
+.lang { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.lang button { background: none; border: none; padding: .3rem .55rem; font-size: .72rem; font-weight: 700; color: var(--dim); }
+.lang button[aria-pressed="true"] { background: rgba(6,182,212,.14); color: var(--accent); }
+
+/* ---------- progress strip ---------- */
+.progress { position: relative; z-index: 9; height: 3px; background: transparent; flex-shrink: 0; }
+.progress .bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width .3s; }
+
+/* ---------- main ---------- */
+main { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.screen { flex: 1; min-height: 0; display: none; }
+.screen.active { display: flex; }
+
+/* ---------- 01 load ---------- */
+#screen-load { overflow-y: auto; justify-content: center; }
+.load-wrap { width: 100%; max-width: 980px; padding: 2.5rem 1.5rem 3rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--accent); margin-bottom: .6rem; }
+h1 { font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.02em; line-height: 1.15; margin-bottom: .7rem; }
+.lead { color: var(--sub); max-width: 640px; margin-bottom: 1.8rem; }
+.drop-zone {
+  position: relative; border: 1.5px dashed var(--border2); border-radius: 14px;
+  background: rgba(17,26,46,.7); padding: 2.4rem 1.5rem; text-align: center;
+  transition: border-color .2s, background .2s;
+}
+.drop-zone.drag-over { border-color: var(--accent); background: rgba(6,182,212,.07); }
+.drop-zone .icon { font-size: 2rem; margin-bottom: .4rem; }
+.drop-zone p { color: var(--sub); margin-bottom: 1.1rem; }
+.drop-zone .btns { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+  padding: .55rem 1rem; border-radius: 8px; font-size: .84rem; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  transition: border-color .15s, background .15s, opacity .15s;
+}
+.btn:hover:not(:disabled) { border-color: var(--border2); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: linear-gradient(135deg, var(--accent2), var(--accent)); border-color: transparent; color: #fff; }
+.btn.primary:hover:not(:disabled) { opacity: .92; }
+.btn.danger { border-color: rgba(244,63,94,.35); color: #fda4af; }
+.btn.sm { padding: .32rem .65rem; font-size: .76rem; }
+.btn.ghost { background: none; }
+.model-status { margin-top: 1rem; font-family: var(--mono); font-size: .74rem; color: var(--sub); display: flex; align-items: center; gap: .5rem; justify-content: center; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+.dot.ok { background: var(--ok); }
+.dot.err { background: var(--blur); }
+.dot.pulse { animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+.cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.8rem; }
+.info-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.15rem; }
+.info-card h3 { font-size: .9rem; margin-bottom: .35rem; display: flex; gap: .5rem; align-items: center; }
+.info-card p { color: var(--sub); font-size: .82rem; }
+.settings-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.6rem; }
+.field label { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--sub); margin-bottom: .35rem; }
+.field .hint { font-size: .74rem; color: var(--dim); margin-top: .3rem; }
+select, input[type=range] { width: 100%; }
+select {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: .5rem .6rem; font: inherit; font-size: .84rem;
+}
+input[type=range] { accent-color: var(--accent); }
+.legal {
+  margin-top: 1.6rem; padding: .9rem 1.1rem; border-radius: var(--radius);
+  border: 1px solid rgba(245,158,11,.28); background: rgba(245,158,11,.06);
+  color: #fcd9a0; font-size: .8rem;
+}
+.legal b { color: #fde7c2; }
+
+/* ---------- 02 review ---------- */
+#screen-review { flex-direction: column; }
+.toolbar {
+  flex-shrink: 0; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .6rem 1.25rem; border-bottom: 1px solid var(--border); background: rgba(13,20,36,.6);
+}
+.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { background: none; border: none; padding: .38rem .75rem; font-size: .78rem; font-weight: 600; color: var(--sub); }
+.seg button[aria-pressed="true"] { background: rgba(6,182,212,.13); color: var(--text); }
+.chips { display: flex; gap: .35rem; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: none; border-radius: 999px; padding: .22rem .7rem; font-size: .74rem; color: var(--sub); }
+.chip[aria-pressed="true"] { border-color: var(--border2); color: var(--accent); background: rgba(6,182,212,.08); }
+.toolbar .spacer { flex: 1; }
+.size-ctl { display: flex; align-items: center; gap: .45rem; color: var(--dim); font-size: .74rem; }
+.size-ctl input { width: 110px; }
+.hint-line { font-size: .74rem; color: var(--dim); }
+.hint-line kbd, .kbd { font-family: var(--mono); font-size: .68rem; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 .3rem; color: var(--sub); }
+
+.view { flex: 1; min-height: 0; display: none; }
+.view.active { display: flex; }
+
+/* grid view */
+#view-grid { overflow-y: auto; flex-direction: column; padding: 1rem 1.25rem 3rem; gap: 1.1rem; }
+.sec-head { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .45rem; }
+.sec-head .name { font-family: var(--mono); font-size: .76rem; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.sec-head .meta { font-family: var(--mono); font-size: .7rem; color: var(--dim); }
+.sec-head .meta .b { color: var(--blur); }
+.sec-head .open { margin-left: auto; background: none; border: none; color: var(--accent); font-size: .74rem; font-weight: 600; }
+.sec-head .open:hover { text-decoration: underline; }
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb), 1fr)); gap: .55rem; }
+.face {
+  position: relative; aspect-ratio: 1; border-radius: 9px; overflow: hidden;
+  border: 2px solid transparent; background: var(--surface); padding: 0;
+  outline-offset: 2px; transition: border-color .12s, transform .12s;
+}
+.face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.face:hover { border-color: var(--border2); }
+.face:active { transform: scale(.97); }
+.face .tag {
+  position: absolute; left: 5px; top: 5px; font-family: var(--mono); font-size: .6rem; font-weight: 700;
+  padding: .05rem .35rem; border-radius: 4px; background: rgba(11,17,32,.78); color: var(--sub);
+}
+.face .tag.low { color: var(--warn); }
+.face .veil { position: absolute; inset: 0; display: none; align-items: flex-end; justify-content: center; padding-bottom: 6px;
+  background: linear-gradient(180deg, transparent 45%, rgba(244,63,94,.55)); }
+.face .veil span { font-size: .62rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #fff; }
+.face.is-blur { border-color: var(--blur); }
+.face.is-blur img { filter: saturate(.6) brightness(.85); }
+.face.is-blur .veil { display: flex; }
+.face.pulse-hl { animation: hl 1.2s ease 2; }
+@keyframes hl { 50% { box-shadow: 0 0 0 4px rgba(6,182,212,.6); } }
+.sec-placeholder { font-size: .76rem; color: var(--dim); font-family: var(--mono); padding: .3rem 0; }
+#view-grid.f-blur .face:not(.is-blur),
+#view-grid.f-open .face.is-blur,
+#view-grid.f-low .face:not(.is-low),
+#view-grid.f-manual .face:not(.is-manual) { display: none; }
+.empty { margin: auto; text-align: center; color: var(--sub); padding: 3rem 1rem; }
+.empty .big { font-size: 2rem; margin-bottom: .5rem; }
+
+/* photo view */
+#view-photo { min-height: 0; }
+.strip { width: 168px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); padding: .6rem; display: flex; flex-direction: column; gap: .5rem; }
+.strip-item { position: relative; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: var(--surface); padding: 0; aspect-ratio: 3/2; flex-shrink: 0; }
+.strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.strip-item.active { border-color: var(--accent); }
+.strip-item .badge { position: absolute; right: 4px; bottom: 4px; font-family: var(--mono); font-size: .62rem; font-weight: 700; padding: 0 .32rem; border-radius: 4px; background: rgba(11,17,32,.82); color: var(--sub); }
+.strip-item .badge.b { background: var(--blur); color: #fff; }
+.strip-item .st { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: .68rem; color: var(--sub); background: rgba(11,17,32,.6); }
+.stage-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.stage-bar { display: flex; align-items: center; gap: .6rem; padding: .55rem 1rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.stage-bar .title { font-family: var(--mono); font-size: .78rem; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.stage-bar .count { font-family: var(--mono); font-size: .72rem; color: var(--dim); }
+.stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; overflow: hidden; }
+.photo-wrap { position: relative; display: inline-block; line-height: 0; user-select: none; touch-action: none; cursor: crosshair; }
+.photo-wrap img { max-width: 100%; max-height: calc(100vh - 190px); display: block; border-radius: 4px; pointer-events: none; }
+.box {
+  position: absolute; border: 2px solid var(--accent); border-radius: 50% / 46%;
+  background: rgba(6,182,212,.06); cursor: pointer; transition: background .12s;
+}
+.box:hover { background: rgba(6,182,212,.18); }
+.box.is-manual { border-style: dashed; }
+.box.is-blur { border-color: var(--blur); background: var(--blur-bg); }
+.box.is-blur:hover { background: rgba(244,63,94,.25); }
+.box.hl { box-shadow: 0 0 0 3px rgba(255,255,255,.75); }
+.box .x {
+  position: absolute; top: -9px; right: -9px; width: 18px; height: 18px; border-radius: 50%;
+  border: none; background: #1f2a44; color: var(--sub); font-size: 11px; line-height: 18px; display: none;
+}
+.box:hover .x { display: block; }
+.box .x:hover { background: var(--blur); color: #fff; }
+.draft { position: absolute; border: 2px dashed #fff; border-radius: 50% / 46%; pointer-events: none; background: rgba(255,255,255,.08); }
+.photo-wrap.preview { cursor: default; }
+.photo-wrap.preview .box { display: none; }
+.stage-msg { color: var(--sub); font-family: var(--mono); font-size: .8rem; }
+
+/* ---------- 03 export ---------- */
+#screen-export { overflow-y: auto; justify-content: center; }
+.export-wrap { width: 100%; max-width: 980px; padding: 2.5rem 1.5rem 3rem; display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.5rem; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
+.panel + .panel { margin-top: 1rem; }
+.panel h2 { font-size: 1rem; margin-bottom: .9rem; }
+.form-title { font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 1.1rem 0 .6rem; display: flex; align-items: center; gap: .4rem; }
+.form-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.form-title:first-child { margin-top: 0; }
+.radio-row { display: flex; gap: .4rem; flex-wrap: wrap; }
+.radio-row label { flex: 1; min-width: 90px; border: 1px solid var(--border); border-radius: 8px; padding: .5rem .6rem; cursor: pointer; font-size: .8rem; text-align: center; }
+.radio-row input { display: none; }
+.radio-row label:has(input:checked) { border-color: var(--border2); background: rgba(6,182,212,.09); color: var(--accent); }
+.check { display: flex; gap: .55rem; align-items: flex-start; font-size: .82rem; color: var(--sub); margin-top: .7rem; cursor: pointer; }
+.check input { margin-top: .2rem; accent-color: var(--accent); }
+.summary { font-family: var(--mono); font-size: .78rem; color: var(--sub); line-height: 1.8; }
+.summary b { color: var(--text); }
+.export-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.1rem; }
+.status-bar {
+  display: flex; align-items: center; gap: .5rem; margin-top: 1rem;
+  padding: .55rem .8rem; border-radius: 8px; font-size: .78rem; border: 1px solid var(--border); color: var(--dim);
+}
+.status-bar.working { color: var(--warn); border-color: rgba(245,158,11,.3); }
+.status-bar.success { color: var(--ok); border-color: rgba(16,185,129,.3); }
+.status-bar.error   { color: var(--blur); border-color: rgba(244,63,94,.3); }
+.status-bar .dot { background: currentColor; }
+.status-bar.working .dot { animation: pulse 1s infinite; }
+.preview-box { background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 200px; }
+.preview-box canvas { max-width: 100%; display: block; }
+.preview-note { font-size: .74rem; color: var(--dim); margin-top: .5rem; }
+.warn-list { margin-top: .6rem; font-size: .78rem; color: var(--warn); }
+
+/* ---------- toasts ---------- */
+#toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 99; pointer-events: none; }
+.toast { padding: .6rem 1rem; border-radius: 9px; font-size: .8rem; font-weight: 600; color: #fff; max-width: 360px; pointer-events: auto;
+  box-shadow: 0 6px 24px rgba(0,0,0,.45); animation: tin .22s ease; }
+.toast.ok { background: rgba(16,185,129,.92); }
+.toast.err { background: rgba(244,63,94,.92); }
+.toast.info { background: rgba(6,182,212,.92); }
+.toast.out { animation: tout .22s ease forwards; }
+@keyframes tin { from { opacity: 0; transform: translateX(14px); } }
+@keyframes tout { to { opacity: 0; transform: translateX(14px); } }
+
+footer { position: relative; z-index: 1; flex-shrink: 0; padding: .35rem 1.25rem; font-size: .68rem; color: var(--dim); border-top: 1px solid var(--border); display: flex; gap: 1rem; }
+footer .r { margin-left: auto; }
+
+@media (max-width: 900px) {
+  .cards3, .settings-row, .export-wrap { grid-template-columns: 1fr; }
+  .stats { display: none; }
+  .strip { width: 110px; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#16213a"/><g fill="#06b6d4"><rect x="8" y="8" width="5" height="5"/><rect x="19" y="8" width="5" height="5" opacity=".6"/><rect x="13.5" y="13.5" width="5" height="5" opacity=".8"/><rect x="8" y="19" width="5" height="5" opacity=".5"/><rect x="19" y="19" width="5" height="5"/></g></svg>
+    <div><span data-i18n="app_name">Gezichten Vervagen</span><small data-i18n="app_sub">offline · niets verlaat deze computer</small></div>
+  </div>
+  <nav class="steps" role="tablist">
+    <button class="step-btn active" data-step="load"><span class="n">01</span><span data-i18n="step_load">Laden</span></button>
+    <button class="step-btn" data-step="review" disabled><span class="n">02</span><span data-i18n="step_review">Beoordelen</span></button>
+    <button class="step-btn" data-step="export" disabled><span class="n">03</span><span data-i18n="step_export">Exporteren</span></button>
+  </nav>
+  <div class="stats">
+    <span><b id="st-photos">0</b> <span data-i18n="st_photos">foto's</span></span>
+    <span><b id="st-faces">0</b> <span data-i18n="st_faces">gezichten</span></span>
+    <span class="s-blur"><b id="st-blur">0</b> <span data-i18n="st_blur">vervaagd</span></span>
+  </div>
+  <div class="lang" role="group" aria-label="Taal / Language">
+    <button data-lang="nl" aria-pressed="true">NL</button>
+    <button data-lang="en" aria-pressed="false">EN</button>
+  </div>
+</header>
+<div class="progress"><div class="bar" id="progress-bar"></div></div>
+
+<main>
+  <!-- ========== 01 LOAD ========== -->
+  <section class="screen active" id="screen-load">
+    <div class="load-wrap">
+      <div class="eyebrow" data-i18n="load_eyebrow">01 — Foto's laden</div>
+      <h1 data-i18n="load_title">Vervaag de juiste gezichten, zonder elke foto te bewerken.</h1>
+      <p class="lead" data-i18n="load_lead">Sleep de foto's van een evenement hierheen. De tool zoekt alle gezichten op; jij klikt de kinderen aan die niet herkenbaar mogen zijn. Daarna exporteer je een schone set, klaar om te publiceren.</p>
+
+      <div class="drop-zone" id="drop-zone">
+        <div class="icon">🖼️</div>
+        <p data-i18n="drop_text">Sleep een map of losse foto's hierheen (JPG, PNG, WebP)</p>
+        <div class="btns">
+          <button class="btn primary" id="btn-pick-files" disabled data-i18n="btn_pick_files">Foto's kiezen</button>
+          <button class="btn" id="btn-pick-dir" disabled data-i18n="btn_pick_dir">Map kiezen</button>
+          <button class="btn ghost" id="btn-open-session" data-i18n="btn_open_session">Sessie openen…</button>
+        </div>
+        <input type="file" id="in-files" accept="image/jpeg,image/png,image/webp" multiple hidden>
+        <input type="file" id="in-dir" webkitdirectory multiple hidden>
+        <input type="file" id="in-session" accept=".json,application/json" hidden>
+        <div class="model-status"><span class="dot pulse" id="model-dot"></span><span id="model-text" data-i18n="model_loading">Detectiemodel laden…</span></div>
+      </div>
+
+      <div class="settings-row">
+        <div class="field">
+          <label for="set-quality" data-i18n="set_quality">Grondigheid</label>
+          <select id="set-quality">
+            <option value="fast" data-i18n="q_fast">Snel — portretten, kleine groepen</option>
+            <option value="normal" selected data-i18n="q_normal">Normaal — klassenfoto's, evenementen</option>
+            <option value="thorough" data-i18n="q_thorough">Grondig — grote groepen, verre gezichten</option>
+          </select>
+          <div class="hint" data-i18n="set_quality_hint">Grondiger vindt kleinere gezichten, maar duurt langer.</div>
+        </div>
+        <div class="field">
+          <label for="set-default" data-i18n="set_default">Nieuw gevonden gezichten</label>
+          <select id="set-default">
+            <option value="keep" selected data-i18n="d_keep">Zichtbaar laten — ik kies wie vervaagd wordt</option>
+            <option value="blur" data-i18n="d_blur">Vervagen — ik kies wie zichtbaar mag zijn</option>
+          </select>
+          <div class="hint" data-i18n="set_default_hint">Kies wat de minste klikken kost.</div>
+        </div>
+        <div class="field">
+          <label for="set-score"><span data-i18n="set_score">Gevoeligheid</span> <span class="mono" id="set-score-val">0.35</span></label>
+          <input type="range" id="set-score" min="0.15" max="0.7" step="0.05" value="0.35">
+          <div class="hint" data-i18n="set_score_hint">Lager = meer gezichten gevonden (ook meer valse treffers).</div>
+        </div>
+      </div>
+
+      <div class="cards3">
+        <div class="info-card"><h3>🔒 <span data-i18n="i1_t">Alles blijft lokaal</span></h3><p data-i18n="i1_p">Foto's worden in deze browser verwerkt. Er is geen server en geen upload; de tool werkt ook zonder internet.</p></div>
+        <div class="info-card"><h3>🙈 <span data-i18n="i2_t">Detectie, geen herkenning</span></h3><p data-i18n="i2_p">De tool vindt waar gezichten staan, maar weet niet wíe dat is. Een mens beslist welk gezicht vervaagd wordt.</p></div>
+        <div class="info-card"><h3>🧹 <span data-i18n="i3_t">Schone export</span></h3><p data-i18n="i3_p">Geëxporteerde foto's krijgen een onomkeerbaar mozaïek en verliezen hun metadata, zoals GPS-locatie en cameragegevens.</p></div>
+      </div>
+
+      <div class="legal" data-i18n-html="legal">
+        <b>Let op:</b> deze tool vervangt geen toestemmingsbeleid. Controleer altijd het eindresultaat, en houd de lijst van kinderen zonder fototoestemming buiten deze tool (bijvoorbeeld in je leerlingadministratie).
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 02 REVIEW ========== -->
+  <section class="screen" id="screen-review">
+    <div class="toolbar">
+      <div class="seg" role="group">
+        <button data-view="grid" aria-pressed="true" data-i18n="v_grid">Gezichtenraster</button>
+        <button data-view="photo" aria-pressed="false" data-i18n="v_photo">Per foto</button>
+      </div>
+      <div class="chips" id="grid-filters">
+        <button class="chip" data-filter="all" aria-pressed="true" data-i18n="f_all">Alle</button>
+        <button class="chip" data-filter="blur" aria-pressed="false" data-i18n="f_blur">Vervaagd</button>
+        <button class="chip" data-filter="open" aria-pressed="false" data-i18n="f_open">Zichtbaar</button>
+        <button class="chip" data-filter="low" aria-pressed="false" data-i18n="f_low">Twijfelgevallen</button>
+        <button class="chip" data-filter="manual" aria-pressed="false" data-i18n="f_manual">Handmatig</button>
+      </div>
+      <span class="spacer"></span>
+      <span class="hint-line" id="hint-grid" data-i18n-html="hint_grid">Klik op een gezicht om het te vervagen.</span>
+      <span class="hint-line hidden" id="hint-photo" data-i18n-html="hint_photo">Klik = vervagen · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld</span>
+      <label class="size-ctl" id="size-ctl"><span>⊟</span><input type="range" id="thumb-size" min="72" max="200" value="112"><span>⊞</span></label>
+      <button class="btn sm primary" id="btn-to-export" data-i18n="btn_to_export">Naar exporteren →</button>
+    </div>
+
+    <div class="view active" id="view-grid"></div>
+
+    <div class="view" id="view-photo">
+      <div class="strip" id="strip"></div>
+      <div class="stage-col">
+        <div class="stage-bar">
+          <button class="btn sm" id="btn-prev" aria-label="Vorige">←</button>
+          <button class="btn sm" id="btn-next" aria-label="Volgende">→</button>
+          <span class="title" id="ph-title">—</span>
+          <span class="count" id="ph-count"></span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn sm" id="btn-all-blur" data-i18n="btn_all_blur">Alles vervagen</button>
+          <button class="btn sm" id="btn-none-blur" data-i18n="btn_none_blur">Niets vervagen</button>
+          <button class="btn sm" id="btn-preview" aria-pressed="false" data-i18n="btn_preview">Voorbeeld tonen</button>
+        </div>
+        <div class="stage" id="stage">
+          <div class="stage-msg" data-i18n="no_photo">Geen foto geselecteerd</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 03 EXPORT ========== -->
+  <section class="screen" id="screen-export">
+    <div class="export-wrap">
+      <div>
+        <div class="panel">
+          <h2 data-i18n="ex_title">Exporteren</h2>
+          <div class="form-title" data-i18n="ex_effect">Effect</div>
+          <div class="radio-row" id="ex-mode">
+            <label><input type="radio" name="mode" value="mosaic" checked><span data-i18n="m_mosaic">Mozaïek</span></label>
+            <label><input type="radio" name="mode" value="solid"><span data-i18n="m_solid">Effen vlak</span></label>
+            <label><input type="radio" name="mode" value="blur"><span data-i18n="m_blur">Vervaging</span></label>
+          </div>
+          <div class="field" style="margin-top:.9rem">
+            <label for="ex-strength"><span data-i18n="ex_strength">Sterkte</span> <span class="mono" id="ex-strength-val"></span></label>
+            <input type="range" id="ex-strength" min="1" max="10" value="6">
+          </div>
+          <div class="field" style="margin-top:.6rem">
+            <label for="ex-pad"><span data-i18n="ex_pad">Marge rond gezicht</span> <span class="mono" id="ex-pad-val"></span></label>
+            <input type="range" id="ex-pad" min="1.1" max="2" step="0.05" value="1.4">
+          </div>
+          <div class="form-title" data-i18n="ex_which">Welke foto's</div>
+          <label class="check"><input type="checkbox" id="ex-all" checked><span data-i18n="ex_all">Alle foto's exporteren, ook die zonder vervaging (zodat je één complete set hebt)</span></label>
+          <div class="field" style="margin-top:.9rem">
+            <label for="ex-quality"><span data-i18n="ex_quality">JPEG-kwaliteit</span> <span class="mono" id="ex-quality-val"></span></label>
+            <input type="range" id="ex-quality" min="0.7" max="0.98" step="0.01" value="0.9">
+          </div>
+          <div class="form-title" data-i18n="ex_summary">Overzicht</div>
+          <div class="summary" id="ex-summary"></div>
+          <div class="warn-list" id="ex-warn"></div>
+          <div class="export-actions">
+            <button class="btn primary" id="btn-export-dir" data-i18n="btn_export_dir">Opslaan in map…</button>
+            <button class="btn" id="btn-export-zip" data-i18n="btn_export_zip">Download als ZIP</button>
+          </div>
+          <div class="status-bar" id="ex-status"><span class="dot"></span><span id="ex-status-text" data-i18n="ex_ready">Klaar om te exporteren</span></div>
+        </div>
+        <div class="panel">
+          <h2 data-i18n="ses_title">Later verder?</h2>
+          <p style="color:var(--sub);font-size:.82rem;margin-bottom:.9rem" data-i18n="ses_text">Sla een sessiebestand op met alle keuzes. Daarin staan alleen bestandsnamen en coördinaten, geen beelden. Open het later samen met dezelfde foto's.</p>
+          <button class="btn" id="btn-save-session" data-i18n="btn_save_session">Sessie opslaan</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 data-i18n="pv_title">Voorbeeld</h2>
+        <div class="preview-box" id="ex-preview"><span class="stage-msg" data-i18n="pv_none">Nog geen vervaagde gezichten</span></div>
+        <div class="preview-note" data-i18n="pv_note">Voorbeeld op verkleinde foto. De export gebruikt de volledige resolutie.</div>
+        <div class="export-actions"><button class="btn sm" id="btn-pv-next" data-i18n="btn_pv_next">Volgende vervaagde foto</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span id="foot-backend" class="mono"></span>
+  <span class="r" id="foot-brand"></span>
+</footer>
+<div id="toasts"></div>
+
+<!-- face-api (MIT, © Vladimir Mandic) incl. TensorFlow.js (Apache-2.0). Only the face DETECTOR weights are bundled. -->
+<script>/*__FACEAPI__*/</script>
+<script type="application/json" id="w-manifest">/*__MANIFEST__*/</script>
+<script type="application/octet-stream" id="w-ssd">/*__WEIGHTS__*/</script>
+
+<script>
+'use strict';
+/* ============================================================
+   CONFIG — tweak here, no need to touch the rest
+   ============================================================ */
+const CONFIG = {
+  brand: 'Homegrown IT Consulting · doon deit lehren',
+  previewMaxSide: 1800,     // px, review/preview image
+  thumbSize: 160,           // px, face crop resolution
+  thumbPad: 0.45,           // context around face in crops
+  quality: {                // detection: downscale + tiling
+    fast:     { max: 1600, tile: 0 },
+    normal:   { max: 2400, tile: 800 },
+    thorough: { max: 3200, tile: 640 },
+  },
+  tileOverlap: 0.25,
+  lowScore: 0.6,            // below = "twijfelgeval"
+  solidColor: '#1e293b',
+};
+
+/* ============================================================
+   i18n
+   ============================================================ */
+const I18N = {
+  nl: {
+    app_name: 'Gezichten Vervagen', app_sub: 'offline · niets verlaat deze computer',
+    step_load: 'Laden', step_review: 'Beoordelen', step_export: 'Exporteren',
+    st_photos: "foto's", st_faces: 'gezichten', st_blur: 'vervaagd',
+    load_eyebrow: "01 — Foto's laden",
+    load_title: 'Vervaag de juiste gezichten, zonder elke foto te bewerken.',
+    load_lead: "Sleep de foto's van een evenement hierheen. De tool zoekt alle gezichten op; jij klikt de kinderen aan die niet herkenbaar mogen zijn. Daarna exporteer je een schone set, klaar om te publiceren.",
+    drop_text: "Sleep een map of losse foto's hierheen (JPG, PNG, WebP)",
+    btn_pick_files: "Foto's kiezen", btn_pick_dir: 'Map kiezen', btn_open_session: 'Sessie openen…',
+    model_loading: 'Detectiemodel laden…', model_ready: 'Detectiemodel klaar', model_err: 'Detectiemodel kon niet laden',
+    set_quality: 'Grondigheid',
+    q_fast: 'Snel — portretten, kleine groepen', q_normal: "Normaal — klassenfoto's, evenementen", q_thorough: 'Grondig — grote groepen, verre gezichten',
+    set_quality_hint: 'Grondiger vindt kleinere gezichten, maar duurt langer.',
+    set_default: 'Nieuw gevonden gezichten',
+    d_keep: 'Zichtbaar laten — ik kies wie vervaagd wordt', d_blur: 'Vervagen — ik kies wie zichtbaar mag zijn',
+    set_default_hint: 'Kies wat de minste klikken kost.',
+    set_score: 'Gevoeligheid', set_score_hint: 'Lager = meer gezichten gevonden (ook meer valse treffers).',
+    i1_t: 'Alles blijft lokaal', i1_p: "Foto's worden in deze browser verwerkt. Er is geen server en geen upload; de tool werkt ook zonder internet.",
+    i2_t: 'Detectie, geen herkenning', i2_p: 'De tool vindt waar gezichten staan, maar weet niet wíe dat is. Een mens beslist welk gezicht vervaagd wordt.',
+    i3_t: 'Schone export', i3_p: "Geëxporteerde foto's krijgen een onomkeerbaar mozaïek en verliezen hun metadata, zoals GPS-locatie en cameragegevens.",
+    legal: '<b>Let op:</b> deze tool vervangt geen toestemmingsbeleid. Controleer altijd het eindresultaat, en houd de lijst van kinderen zonder fototoestemming buiten deze tool (bijvoorbeeld in je leerlingadministratie).',
+    v_grid: 'Gezichtenraster', v_photo: 'Per foto',
+    f_all: 'Alle', f_blur: 'Vervaagd', f_open: 'Zichtbaar', f_low: 'Twijfelgevallen', f_manual: 'Handmatig',
+    hint_grid: 'Klik op een gezicht om het te vervagen.',
+    hint_photo: 'Klik = vervagen · sleep = gemist gezicht toevoegen · <kbd>←</kbd><kbd>→</kbd> foto · <kbd>V</kbd> voorbeeld',
+    btn_to_export: 'Naar exporteren →',
+    btn_all_blur: 'Alles vervagen', btn_none_blur: 'Niets vervagen', btn_preview: 'Voorbeeld tonen', btn_preview_off: 'Kaders tonen',
+    no_photo: 'Geen foto geselecteerd',
+    open_photo: 'Open foto ↗',
+    sec_faces: n => `${n} ${n === 1 ? 'gezicht' : 'gezichten'}`,
+    sec_blurred: n => `${n} vervaagd`,
+    sec_none: 'Geen gezichten gevonden. Controleer de foto in "Per foto" en sleep handmatig een kader als er iemand gemist is.',
+    sec_wait: 'In de wachtrij…', sec_busy: 'Gezichten zoeken…', sec_err: 'Kon deze foto niet openen (formaat niet ondersteund?)',
+    tag_manual: 'HAND', veil: 'vervaagd',
+    empty: "Nog geen foto's geladen.",
+    ex_title: 'Exporteren', ex_effect: 'Effect', m_mosaic: 'Mozaïek', m_solid: 'Effen vlak', m_blur: 'Vervaging',
+    ex_strength: 'Sterkte', ex_pad: 'Marge rond gezicht', ex_which: "Welke foto's",
+    ex_all: "Alle foto's exporteren, ook die zonder vervaging (zodat je één complete set hebt)",
+    ex_quality: 'JPEG-kwaliteit', ex_summary: 'Overzicht',
+    sum: (p, f, pb) => `<b>${p}</b> foto's in export<br><b>${f}</b> gezichten worden vervaagd<br><b>${pb}</b> foto's met vervaging`,
+    warn_pending: n => `⚠ ${n} foto('s) worden nog verwerkt. Wacht tot de detectie klaar is.`,
+    warn_err: n => `⚠ ${n} foto('s) konden niet worden geopend en worden overgeslagen.`,
+    warn_blur_mode: '⚠ Vervaging is zwakker dan mozaïek of een effen vlak. Gebruik die laatste voor publicatie.',
+    btn_export_dir: 'Opslaan in map…', btn_export_zip: 'Download als ZIP',
+    ex_ready: 'Klaar om te exporteren', ex_busy: (i, n) => `Exporteren… ${i}/${n}`,
+    ex_done_dir: (n, d) => `${n} foto's opgeslagen in de map "${d}"`, ex_done_zip: n => `${n} foto's in ZIP gedownload`,
+    ex_fail: 'Export mislukt: ',
+    ses_title: 'Later verder?', ses_text: 'Sla een sessiebestand op met alle keuzes. Daarin staan alleen bestandsnamen en coördinaten, geen beelden. Open het later samen met dezelfde foto\'s.',
+    btn_save_session: 'Sessie opslaan',
+    pv_title: 'Voorbeeld', pv_none: 'Nog geen vervaagde gezichten', pv_note: 'Voorbeeld op verkleinde foto. De export gebruikt de volledige resolutie.', btn_pv_next: 'Volgende vervaagde foto',
+    t_added: n => `${n} foto('s) toegevoegd`, t_dupes: n => `${n} dubbele foto('s) overgeslagen`,
+    t_noimg: "Geen bruikbare foto's gevonden (JPG, PNG of WebP)",
+    t_session_loaded: n => `Sessie geladen: keuzes voor ${n} foto('s) hersteld`,
+    t_session_pending: "Sessie geladen. Laad nu dezelfde foto's om de keuzes te herstellen.",
+    t_session_bad: 'Dit is geen geldig sessiebestand', t_saved: 'Sessie opgeslagen',
+    t_detect_done: n => `Klaar: ${n} gezichten gevonden`,
+    t_small_box: 'Kader te klein; sleep een groter kader',
+    backend: b => `rekenen via ${b === 'webgl' ? 'GPU (WebGL)' : 'CPU (traag)'}`,
+    unsaved: 'Je hebt keuzes die nog niet geëxporteerd of opgeslagen zijn.',
+    strength_lbl: v => `${v}/10`, pad_lbl: v => `${Math.round((v - 1) * 100)}%`, q_lbl: v => `${Math.round(v * 100)}`,
+    of: 'van', prev: 'Vorige', next: 'Volgende',
+  },
+  en: {
+    app_name: 'Face Blur Review', app_sub: 'offline · nothing leaves this computer',
+    step_load: 'Load', step_review: 'Review', step_export: 'Export',
+    st_photos: 'photos', st_faces: 'faces', st_blur: 'blurred',
+    load_eyebrow: '01 — Load photos',
+    load_title: 'Blur the right faces without editing every photo.',
+    load_lead: 'Drop the photos of an event here. The tool finds all faces; you click the children who must not be recognisable. Then export a clean set, ready to publish.',
+    drop_text: 'Drop a folder or individual photos here (JPG, PNG, WebP)',
+    btn_pick_files: 'Choose photos', btn_pick_dir: 'Choose folder', btn_open_session: 'Open session…',
+    model_loading: 'Loading detection model…', model_ready: 'Detection model ready', model_err: 'Detection model failed to load',
+    set_quality: 'Thoroughness',
+    q_fast: 'Fast — portraits, small groups', q_normal: 'Normal — class photos, events', q_thorough: 'Thorough — large groups, distant faces',
+    set_quality_hint: 'More thorough finds smaller faces but takes longer.',
+    set_default: 'Newly found faces',
+    d_keep: 'Keep visible — I pick who gets blurred', d_blur: 'Blur — I pick who may be visible',
+    set_default_hint: 'Pick whichever needs the fewest clicks.',
+    set_score: 'Sensitivity', set_score_hint: 'Lower = more faces found (and more false hits).',
+    i1_t: 'Everything stays local', i1_p: 'Photos are processed in this browser. No server, no upload; it works without internet.',
+    i2_t: 'Detection, not recognition', i2_p: 'The tool finds where faces are but has no idea who they are. A person decides which face gets blurred.',
+    i3_t: 'Clean export', i3_p: 'Exported photos get an irreversible mosaic and lose their metadata, such as GPS location and camera details.',
+    legal: '<b>Note:</b> this tool does not replace a consent policy. Always check the result, and keep the list of children without photo consent outside this tool (e.g. in the student administration).',
+    v_grid: 'Face grid', v_photo: 'Per photo',
+    f_all: 'All', f_blur: 'Blurred', f_open: 'Visible', f_low: 'Uncertain', f_manual: 'Manual',
+    hint_grid: 'Click a face to blur it.',
+    hint_photo: 'Click = blur · drag = add a missed face · <kbd>←</kbd><kbd>→</kbd> photo · <kbd>V</kbd> preview',
+    btn_to_export: 'Go to export →',
+    btn_all_blur: 'Blur all', btn_none_blur: 'Blur none', btn_preview: 'Show preview', btn_preview_off: 'Show boxes',
+    no_photo: 'No photo selected',
+    open_photo: 'Open photo ↗',
+    sec_faces: n => `${n} ${n === 1 ? 'face' : 'faces'}`,
+    sec_blurred: n => `${n} blurred`,
+    sec_none: 'No faces found. Check the photo in "Per photo" and drag a box by hand if someone was missed.',
+    sec_wait: 'Queued…', sec_busy: 'Finding faces…', sec_err: 'Could not open this photo (unsupported format?)',
+    tag_manual: 'HAND', veil: 'blurred',
+    empty: 'No photos loaded yet.',
+    ex_title: 'Export', ex_effect: 'Effect', m_mosaic: 'Mosaic', m_solid: 'Solid', m_blur: 'Blur',
+    ex_strength: 'Strength', ex_pad: 'Margin around face', ex_which: 'Which photos',
+    ex_all: 'Export all photos, including those without blurring (so you have one complete set)',
+    ex_quality: 'JPEG quality', ex_summary: 'Summary',
+    sum: (p, f, pb) => `<b>${p}</b> photos in export<br><b>${f}</b> faces will be blurred<br><b>${pb}</b> photos with blurring`,
+    warn_pending: n => `⚠ ${n} photo(s) still processing. Wait for detection to finish.`,
+    warn_err: n => `⚠ ${n} photo(s) could not be opened and will be skipped.`,
+    warn_blur_mode: '⚠ Blur is weaker than mosaic or solid. Use those for publishing.',
+    btn_export_dir: 'Save to folder…', btn_export_zip: 'Download as ZIP',
+    ex_ready: 'Ready to export', ex_busy: (i, n) => `Exporting… ${i}/${n}`,
+    ex_done_dir: (n, d) => `${n} photos saved in folder "${d}"`, ex_done_zip: n => `${n} photos downloaded as ZIP`,
+    ex_fail: 'Export failed: ',
+    ses_title: 'Continue later?', ses_text: 'Save a session file with all choices. It contains only file names and coordinates, no images. Open it later together with the same photos.',
+    btn_save_session: 'Save session',
+    pv_title: 'Preview', pv_none: 'No blurred faces yet', pv_note: 'Preview on a downscaled photo. The export uses full resolution.', btn_pv_next: 'Next blurred photo',
+    t_added: n => `${n} photo(s) added`, t_dupes: n => `${n} duplicate photo(s) skipped`,
+    t_noimg: 'No usable photos found (JPG, PNG or WebP)',
+    t_session_loaded: n => `Session loaded: choices restored for ${n} photo(s)`,
+    t_session_pending: 'Session loaded. Now load the same photos to restore the choices.',
+    t_session_bad: 'Not a valid session file', t_saved: 'Session saved',
+    t_detect_done: n => `Done: ${n} faces found`,
+    t_small_box: 'Box too small; drag a larger box',
+    backend: b => `computing on ${b === 'webgl' ? 'GPU (WebGL)' : 'CPU (slow)'}`,
+    unsaved: 'You have choices that have not been exported or saved yet.',
+    strength_lbl: v => `${v}/10`, pad_lbl: v => `${Math.round((v - 1) * 100)}%`, q_lbl: v => `${Math.round(v * 100)}`,
+    of: 'of', prev: 'Previous', next: 'Next',
+  },
+};
+let lang = 'nl';
+try { const l = localStorage.getItem('fv-lang'); if (l && I18N[l]) lang = l; } catch (e) {}
+function t(key, ...args) {
+  const v = I18N[lang][key] ?? I18N.nl[key] ?? key;
+  return typeof v === 'function' ? v(...args) : v;
+}
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = t('app_name');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll('.lang button').forEach(b => b.setAttribute('aria-pressed', b.dataset.lang === lang));
+  updateModelStatus();
+  updatePreviewBtn();
+  updateRangeLabels();
+  renderGrid();
+  renderStrip();
+  renderStageMeta();
+  recalc();
+}
+
+/* ============================================================
+   state
+   ============================================================ */
+const state = {
+  version: 1,
+  photos: [],          // {id,name,size,lastModified,w,h,status,previewUrl,faces:[]}
+  current: -1,         // index in photos for photo view
+  view: 'grid',
+  filter: 'all',
+  previewMode: false,
+  dirty: false,
+};
+const files = new Map();     // photo id -> File
+let pendingSession = null;   // session loaded before photos
+let modelReady = false, modelError = null, backendName = '';
+let seq = 0;
+const uid = p => `${p}${(++seq).toString(36)}`;
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+function settings() {
+  return {
+    quality: $('#set-quality').value,
+    defaultBlur: $('#set-default').value === 'blur',
+    minScore: parseFloat($('#set-score').value),
+    mode: ($('#ex-mode input:checked') || {}).value || 'mosaic',
+    strength: parseInt($('#ex-strength').value, 10),
+    pad: parseFloat($('#ex-pad').value),
+    jpegQ: parseFloat($('#ex-quality').value),
+    exportAll: $('#ex-all').checked,
+  };
+}
+
+/* ============================================================
+   toasts
+   ============================================================ */
+function toast(msg, type = 'info', ms = 3600) {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`; el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.classList.add('out'); el.addEventListener('animationend', () => el.remove(), { once: true }); }, ms);
+}
+
+/* ============================================================
+   model
+   ============================================================ */
+function b64ToBytes(b64) {
+  const bin = atob(b64.replace(/\s+/g, ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function initModel() {
+  try {
+    const tf = faceapi.tf;
+    let ok = false;
+    try { ok = await tf.setBackend('webgl'); await tf.ready(); } catch (e) { ok = false; }
+    if (!ok || tf.getBackend() !== 'webgl') { await tf.setBackend('cpu'); await tf.ready(); }
+    backendName = tf.getBackend();
+    const manifest = JSON.parse($('#w-manifest').textContent);
+    const bytes = b64ToBytes($('#w-ssd').textContent);
+    const weightMap = tf.io.decodeWeights(bytes.buffer, manifest[0].weights);
+    await faceapi.nets.ssdMobilenetv1.loadFromWeightMap(weightMap);
+    $('#w-ssd').textContent = ''; // free ~7 MB of string memory
+    const warm = document.createElement('canvas'); warm.width = warm.height = 128;
+    await faceapi.detectAllFaces(warm, new faceapi.SsdMobilenetv1Options({ minConfidence: .5 }));
+    modelReady = true;
+  } catch (e) {
+    console.error(e); modelError = e;
+  }
+  updateModelStatus();
+  $('#btn-pick-files').disabled = !modelReady;
+  $('#btn-pick-dir').disabled = !modelReady;
+  if (modelReady) processQueue();
+}
+function updateModelStatus() {
+  const dot = $('#model-dot'), txt = $('#model-text');
+  if (modelError) { dot.className = 'dot err'; txt.textContent = t('model_err') + ': ' + (modelError.message || modelError); }
+  else if (modelReady) { dot.className = 'dot ok'; txt.textContent = t('model_ready') + ' · ' + t('backend', backendName); }
+  else { dot.className = 'dot pulse'; txt.textContent = t('model_loading'); }
+  $('#foot-backend').textContent = modelReady ? t('backend', backendName) : '';
+}
+
+/* ============================================================
+   loading photos
+   ============================================================ */
+const IMG_RE = /\.(jpe?g|png|webp)$/i;
+function addFiles(list) {
+  const arr = [...list].filter(f => IMG_RE.test(f.name) || /^image\/(jpeg|png|webp)$/.test(f.type));
+  if (!arr.length) { toast(t('t_noimg'), 'err'); return; }
+  arr.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  const known = new Set(state.photos.map(p => p.name + '|' + p.size));
+  let added = 0, dupes = 0;
+  for (const f of arr) {
+    const key = f.name + '|' + f.size;
+    if (known.has(key)) { dupes++; continue; }
+    known.add(key);
+    const p = { id: uid('p'), name: f.name, size: f.size, lastModified: f.lastModified, w: 0, h: 0, status: 'pending', previewUrl: '', faces: [] };
+    const saved = takeSavedFaces(p);
+    if (saved) { p.faces = saved; p.restored = true; }
+    files.set(p.id, f);
+    state.photos.push(p);
+    added++;
+  }
+  if (added) toast(t('t_added', added), 'ok');
+  if (dupes) toast(t('t_dupes', dupes), 'info');
+  if (state.current < 0 && state.photos.length) state.current = 0;
+  $$('.step-btn[data-step="review"], .step-btn[data-step="export"]').forEach(b => b.disabled = false);
+  renderGrid(); renderStrip(); recalc();
+  goStep('review');
+  processQueue();
+}
+function takeSavedFaces(p) {
+  if (!pendingSession) return null;
+  const hit = pendingSession.photos.find(s => s.name === p.name && s.size === p.size);
+  if (!hit) return null;
+  pendingSession.matched = (pendingSession.matched || 0) + 1;
+  return hit.faces.map(f => ({ id: uid('f'), x: f.x, y: f.y, w: f.w, h: f.h, score: f.score ?? 1, source: f.source || 'auto', blur: !!f.blur, thumbUrl: '' }));
+}
+
+// folders dropped via drag & drop
+async function filesFromDataTransfer(dt) {
+  const out = [];
+  const items = [...(dt.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!items.length) return [...dt.files];
+  const walk = entry => new Promise(res => {
+    if (entry.isFile) entry.file(f => { out.push(f); res(); }, () => res());
+    else if (entry.isDirectory) {
+      const reader = entry.createReader(); const all = [];
+      const readBatch = () => reader.readEntries(async batch => {
+        if (!batch.length) { for (const e of all) await walk(e); res(); }
+        else { all.push(...batch); readBatch(); }
+      }, () => res());
+      readBatch();
+    } else res();
+  });
+  for (const e of items) await walk(e);
+  return out;
+}
+
+/* ============================================================
+   detection pipeline
+   ============================================================ */
+const canvases = {};
+function getCanvas(key, w, h) {
+  let c = canvases[key];
+  if (!c) { const el = document.createElement('canvas'); c = canvases[key] = { canvas: el, ctx: el.getContext('2d', { willReadFrequently: false }) }; }
+  if (c.canvas.width !== w) c.canvas.width = w;
+  if (c.canvas.height !== h) c.canvas.height = h;
+  return c;
+}
+function positions(len, T, step) {
+  if (len <= T) return [0];
+  const out = [];
+  for (let p = 0; p + T < len; p += step) out.push(p);
+  out.push(len - T);
+  return [...new Set(out)];
+}
+async function detectFaces(bitmap, opts) {
+  const q = CONFIG.quality[opts.quality] || CONFIG.quality.normal;
+  const W = bitmap.width, H = bitmap.height;
+  const s = Math.min(1, q.max / Math.max(W, H));
+  const dw = Math.round(W * s), dh = Math.round(H * s);
+  const det = getCanvas('det', dw, dh);
+  det.ctx.drawImage(bitmap, 0, 0, dw, dh);
+  const o = new faceapi.SsdMobilenetv1Options({ minConfidence: opts.minScore, maxResults: 300 });
+  const found = [];
+  const run = async (canvas, ox, oy) => {
+    const res = await faceapi.detectAllFaces(canvas, o);
+    for (const d of res) {
+      const b = d.box;
+      found.push({ x: (b.x + ox) / dw, y: (b.y + oy) / dh, w: b.width / dw, h: b.height / dh, score: d.score });
+    }
+  };
+  await run(det.canvas, 0, 0);
+  if (q.tile && Math.max(dw, dh) > q.tile * 1.25) {
+    const T = q.tile, step = Math.round(T * (1 - CONFIG.tileOverlap));
+    const tw = Math.min(T, dw), th = Math.min(T, dh);
+    const tile = getCanvas('tile', tw, th);
+    for (const y of positions(dh, th, step)) {
+      for (const x of positions(dw, tw, step)) {
+        tile.ctx.clearRect(0, 0, tw, th);
+        tile.ctx.drawImage(det.canvas, x, y, tw, th, 0, 0, tw, th);
+        await run(tile.canvas, x, y);
+      }
+      await nextFrame(); // keep the UI responsive
+    }
+  }
+  return mergeBoxes(found)
+    .filter(b => b.w > 0.003 && b.h > 0.003)
+    .sort((a, b) => (a.x + a.w / 2) - (b.x + b.w / 2));
+}
+function overlap(a, b) {
+  const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const inter = ix * iy; if (!inter) return false;
+  const A = a.w * a.h, B = b.w * b.h;
+  if (inter / (A + B - inter) > 0.3 || inter / Math.min(A, B) > 0.6) return true;
+  // partial detections at tile edges: centre of the smaller box inside the larger one
+  const [s, l] = A < B ? [a, b] : [b, a];
+  const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+  return cx > l.x && cx < l.x + l.w && cy > l.y && cy < l.y + l.h;
+}
+function mergeBoxes(list) {
+  // cluster overlapping detections (full frame + tiles), keep the union:
+  // a face cut in half at a tile edge merges back into one box,
+  // and for blurring a slightly larger box is the safe direction.
+  list.sort((a, b) => b.score - a.score);
+  let boxes = list.map(b => ({ ...b }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const out = [];
+    const used = new Array(boxes.length).fill(false);
+    for (let i = 0; i < boxes.length; i++) {
+      if (used[i]) continue;
+      let m = boxes[i]; used[i] = true;
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (used[j] || !overlap(m, boxes[j])) continue;
+        const n = boxes[j]; used[j] = true; changed = true;
+        const x1 = Math.min(m.x, n.x), y1 = Math.min(m.y, n.y);
+        const x2 = Math.max(m.x + m.w, n.x + n.w), y2 = Math.max(m.y + m.h, n.y + n.h);
+        m = { x: x1, y: y1, w: x2 - x1, h: y2 - y1, score: Math.max(m.score, n.score) };
+      }
+      out.push(m);
+    }
+    boxes = out;
+  }
+  return boxes;
+}
+function blobUrlFromCanvas(canvas, type = 'image/jpeg', q = 0.85) {
+  return new Promise(res => canvas.toBlob(b => res(b ? URL.createObjectURL(b) : ''), type, q));
+}
+async function cropThumb(src, W, H, f) {
+  const side = Math.max(f.w * W, f.h * H) * (1 + CONFIG.thumbPad * 2);
+  const cx = (f.x + f.w / 2) * W, cy = (f.y + f.h / 2) * H;
+  const S = CONFIG.thumbSize;
+  const c = getCanvas('thumb', S, S);
+  c.ctx.fillStyle = '#111a2e'; c.ctx.fillRect(0, 0, S, S);
+  c.ctx.imageSmoothingQuality = 'high';
+  c.ctx.drawImage(src, cx - side / 2, cy - side / 2, side, side, 0, 0, S, S);
+  return blobUrlFromCanvas(c.canvas, 'image/jpeg', 0.85);
+}
+async function decode(file) {
+  return createImageBitmap(file, { imageOrientation: 'from-image' });
+}
+
+let queueRunning = false;
+async function processQueue() {
+  if (queueRunning || !modelReady) return;
+  queueRunning = true;
+  const opts = settings();
+  let detectedAny = false;
+  try {
+    let p;
+    while ((p = state.photos.find(x => x.status === 'pending'))) {
+      p.status = 'busy'; renderSection(p); renderStripItem(p); updateProgress();
+      try {
+        const bmp = await decode(files.get(p.id));
+        p.w = bmp.width; p.h = bmp.height;
+        // preview image
+        const ps = Math.min(1, CONFIG.previewMaxSide / Math.max(p.w, p.h));
+        const pv = getCanvas('pv', Math.round(p.w * ps), Math.round(p.h * ps));
+        pv.ctx.drawImage(bmp, 0, 0, pv.canvas.width, pv.canvas.height);
+        p.previewUrl = await blobUrlFromCanvas(pv.canvas, 'image/jpeg', 0.86);
+        // detection (skipped when choices were restored from a session)
+        if (!p.restored) {
+          const boxes = await detectFaces(bmp, opts);
+          detectedAny = true;
+          p.faces = boxes.map(b => ({ id: uid('f'), ...b, source: 'auto', blur: opts.defaultBlur, thumbUrl: '' }));
+          if (opts.defaultBlur && p.faces.length) state.dirty = true;
+        }
+        for (const f of p.faces) f.thumbUrl = await cropThumb(bmp, p.w, p.h, f);
+        bmp.close && bmp.close();
+        p.status = 'done';
+      } catch (e) {
+        console.error(p.name, e);
+        p.status = 'error';
+      }
+      renderSection(p); renderStripItem(p);
+      if (state.photos[state.current] === p) renderStage();
+      recalc(); updateProgress();
+      await nextFrame();
+    }
+  } finally { queueRunning = false; }
+  updateProgress();
+  const total = state.photos.reduce((n, p) => n + p.faces.length, 0);
+  if (detectedAny && !state.photos.some(p => p.status === 'pending' || p.status === 'busy')) toast(t('t_detect_done', total), 'ok');
+  if (pendingSession && pendingSession.matched) { toast(t('t_session_loaded', pendingSession.matched), 'ok'); pendingSession.matched = 0; }
+}
+function updateProgress() {
+  const n = state.photos.length;
+  const done = state.photos.filter(p => p.status === 'done' || p.status === 'error').length;
+  const busy = state.photos.some(p => p.status === 'pending' || p.status === 'busy');
+  $('#progress-bar').style.width = busy && n ? `${(done / n) * 100}%` : '0';
+}
+
+/* ============================================================
+   rendering — grid view
+   ============================================================ */
+function faceCardHtml(p, f) {
+  const low = f.source === 'auto' && f.score < CONFIG.lowScore;
+  const cls = ['face', f.blur && 'is-blur', low && 'is-low', f.source === 'manual' && 'is-manual'].filter(Boolean).join(' ');
+  const tag = f.source === 'manual' ? `<span class="tag">${t('tag_manual')}</span>`
+    : `<span class="tag${low ? ' low' : ''}">${Math.round(f.score * 100)}</span>`;
+  return `<button class="${cls}" data-p="${p.id}" data-f="${f.id}" title="${esc(p.name)}">
+    ${f.thumbUrl ? `<img src="${f.thumbUrl}" alt="" loading="lazy" decoding="async">` : ''}${tag}
+    <span class="veil"><span>${t('veil')}</span></span></button>`;
+}
+function sectionInner(p) {
+  const nb = p.faces.filter(f => f.blur).length;
+  let body;
+  if (p.status === 'pending') body = `<div class="sec-placeholder">${t('sec_wait')}</div>`;
+  else if (p.status === 'busy') body = `<div class="sec-placeholder">${t('sec_busy')}</div>`;
+  else if (p.status === 'error') body = `<div class="sec-placeholder" style="color:var(--blur)">${t('sec_err')}</div>`;
+  else if (!p.faces.length) body = `<div class="sec-placeholder">${t('sec_none')}</div>`;
+  else body = `<div class="faces">${p.faces.map(f => faceCardHtml(p, f)).join('')}</div>`;
+  return `<div class="sec-head"><span class="name">${esc(p.name)}</span>
+    <span class="meta">${t('sec_faces', p.faces.length)}${nb ? ` · <span class="b">${t('sec_blurred', nb)}</span>` : ''}</span>
+    <button class="open" data-open="${p.id}">${t('open_photo')}</button></div>${body}`;
+}
+function renderGrid() {
+  const g = $('#view-grid');
+  if (!state.photos.length) { g.innerHTML = `<div class="empty"><div class="big">🖼️</div>${t('empty')}</div>`; return; }
+  g.innerHTML = state.photos.map(p => `<section class="sec" id="sec-${p.id}">${sectionInner(p)}</section>`).join('');
+  applyFilterVisibility();
+}
+function renderSection(p) {
+  const el = document.getElementById('sec-' + p.id);
+  if (el) { el.innerHTML = sectionInner(p); applyFilterVisibility(); }
+}
+function applyFilterVisibility() {
+  const g = $('#view-grid');
+  g.className = 'view' + (state.view === 'grid' ? ' active' : '') + (state.filter !== 'all' ? ' f-' + state.filter : '');
+  if (state.filter === 'all') { $$('#view-grid .sec').forEach(s => s.classList.remove('hidden')); return; }
+  for (const p of state.photos) {
+    const sec = document.getElementById('sec-' + p.id); if (!sec) continue;
+    const any = p.faces.some(f => matchFilter(f));
+    sec.classList.toggle('hidden', !any);
+  }
+}
+function matchFilter(f) {
+  switch (state.filter) {
+    case 'blur': return f.blur;
+    case 'open': return !f.blur;
+    case 'low': return f.source === 'auto' && f.score < CONFIG.lowScore;
+    case 'manual': return f.source === 'manual';
+    default: return true;
+  }
+}
+function updateSectionMeta(p) {
+  const sec = document.getElementById('sec-' + p.id); if (!sec) return;
+  const meta = sec.querySelector('.meta'); if (!meta) return;
+  const nb = p.faces.filter(f => f.blur).length;
+  meta.innerHTML = `${t('sec_faces', p.faces.length)}${nb ? ` · <span class="b">${t('sec_blurred', nb)}</span>` : ''}`;
+}
+
+/* ============================================================
+   rendering — photo view
+   ============================================================ */
+function stripItemInner(p) {
+  const nb = p.faces.filter(f => f.blur).length;
+  const st = p.status === 'done' ? '' : `<span class="st">${p.status === 'error' ? '✗' : p.status === 'busy' ? '…' : '·'}</span>`;
+  return `${p.previewUrl ? `<img src="${p.previewUrl}" alt="" loading="lazy">` : ''}${st}
+    ${p.status === 'done' ? `<span class="badge${nb ? ' b' : ''}">${nb ? nb + '/' : ''}${p.faces.length}</span>` : ''}`;
+}
+function renderStrip() {
+  $('#strip').innerHTML = state.photos.map((p, i) =>
+    `<button class="strip-item${i === state.current ? ' active' : ''}" id="st-${p.id}" data-i="${i}" title="${esc(p.name)}">${stripItemInner(p)}</button>`).join('');
+}
+function renderStripItem(p) {
+  const el = document.getElementById('st-' + p.id); if (el) el.innerHTML = stripItemInner(p);
+}
+function curPhoto() { return state.photos[state.current] || null; }
+function renderStageMeta() {
+  const p = curPhoto();
+  $('#ph-title').textContent = p ? p.name : '—';
+  $('#ph-count').textContent = p ? `${state.current + 1} ${t('of')} ${state.photos.length}` : '';
+  $('#btn-prev').disabled = !p || state.current <= 0;
+  $('#btn-next').disabled = !p || state.current >= state.photos.length - 1;
+  $('#btn-prev').setAttribute('aria-label', t('prev'));
+  $('#btn-next').setAttribute('aria-label', t('next'));
+}
+function boxHtml(f) {
+  const cls = ['box', f.blur && 'is-blur', f.source === 'manual' && 'is-manual'].filter(Boolean).join(' ');
+  return `<div class="${cls}" data-f="${f.id}" style="left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%"><button class="x" data-del="${f.id}" aria-label="remove">×</button></div>`;
+}
+async function renderStage() {
+  renderStageMeta();
+  const stage = $('#stage');
+  const p = curPhoto();
+  if (!p) { stage.innerHTML = `<div class="stage-msg">${t('no_photo')}</div>`; return; }
+  if (p.status !== 'done') { stage.innerHTML = `<div class="stage-msg">${p.status === 'error' ? t('sec_err') : t('sec_busy')}</div>`; return; }
+  let src = p.previewUrl;
+  if (state.previewMode) src = await renderEffectPreview(p) || p.previewUrl;
+  if (curPhoto() !== p) return; // user moved on during async render
+  stage.innerHTML = `<div class="photo-wrap${state.previewMode ? ' preview' : ''}" id="photo-wrap"><img src="${src}" alt="">${p.faces.map(boxHtml).join('')}</div>`;
+  $$('#strip .strip-item').forEach((el, i) => el.classList.toggle('active', i === state.current));
+  const act = document.getElementById('st-' + p.id); if (act) act.scrollIntoView({ block: 'nearest' });
+}
+let previewCache = { key: '', url: '' };
+async function renderEffectPreview(p) {
+  const s = settings();
+  const key = p.id + JSON.stringify(p.faces.map(f => [f.x, f.y, f.w, f.h, f.blur])) + s.mode + s.strength + s.pad;
+  if (previewCache.key === key) return previewCache.url;
+  const img = await loadImg(p.previewUrl);
+  const c = getCanvas('effect', img.naturalWidth, img.naturalHeight);
+  c.ctx.drawImage(img, 0, 0);
+  applyEffects(c.ctx, p.faces.filter(f => f.blur), c.canvas.width, c.canvas.height, s);
+  const url = await blobUrlFromCanvas(c.canvas, 'image/jpeg', 0.88);
+  if (previewCache.url) URL.revokeObjectURL(previewCache.url);
+  previewCache = { key, url };
+  return url;
+}
+function loadImg(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+function updatePreviewBtn() {
+  const b = $('#btn-preview');
+  b.textContent = state.previewMode ? t('btn_preview_off') : t('btn_preview');
+  b.setAttribute('aria-pressed', state.previewMode);
+}
+
+/* ============================================================
+   recalc — cheap patching (stats, classes), never rebuilds
+   ============================================================ */
+function recalc() {
+  const photos = state.photos.length;
+  const faces = state.photos.reduce((n, p) => n + p.faces.length, 0);
+  const blur = state.photos.reduce((n, p) => n + p.faces.filter(f => f.blur).length, 0);
+  $('#st-photos').textContent = photos;
+  $('#st-faces').textContent = faces;
+  $('#st-blur').textContent = blur;
+  if ($('#screen-export').classList.contains('active')) renderExportSummary();
+}
+function findFace(pid, fid) {
+  const p = state.photos.find(x => x.id === pid); if (!p) return {};
+  return { p, f: p.faces.find(x => x.id === fid) };
+}
+function setBlur(p, f, val) {
+  f.blur = val; state.dirty = true;
+  const card = document.querySelector(`.face[data-f="${f.id}"]`);
+  if (card) card.classList.toggle('is-blur', f.blur);
+  const box = document.querySelector(`.box[data-f="${f.id}"]`);
+  if (box) box.classList.toggle('is-blur', f.blur);
+  updateSectionMeta(p); renderStripItem(p);
+}
+function toggleFace(p, f) {
+  setBlur(p, f, !f.blur);
+  if (state.filter !== 'all') applyFilterVisibility();
+  recalc();
+  if (state.previewMode && curPhoto() === p) renderStage();
+}
+
+/* ============================================================
+   effects — shared by preview and full-resolution export
+   ============================================================ */
+const supportsFilter = (() => { try { return 'filter' in document.createElement('canvas').getContext('2d'); } catch (e) { return false; } })();
+function faceEllipse(f, W, H, pad) {
+  // SSD boxes are tight on the face; grow sideways by `pad`, and a bit
+  // more vertically (forehead + hair also identify a child).
+  const cx = (f.x + f.w / 2) * W;
+  const cy = (f.y + f.h / 2 - f.h * 0.06) * H;
+  const rx = f.w * W * pad / 2;
+  const ry = f.h * H * pad * 1.12 / 2;
+  return { cx, cy, rx, ry };
+}
+function applyEffects(ctx, faces, W, H, s) {
+  const mode = s.mode === 'blur' && !supportsFilter ? 'mosaic' : s.mode;
+  for (const f of faces) {
+    const { cx, cy, rx, ry } = faceEllipse(f, W, H, s.pad);
+    const x0 = Math.max(0, Math.floor(cx - rx)), y0 = Math.max(0, Math.floor(cy - ry));
+    const x1 = Math.min(W, Math.ceil(cx + rx)), y1 = Math.min(H, Math.ceil(cy + ry));
+    const bw = x1 - x0, bh = y1 - y0;
+    if (bw < 2 || bh < 2) continue;
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.clip();
+    if (mode === 'solid') {
+      ctx.fillStyle = CONFIG.solidColor; ctx.fillRect(x0, y0, bw, bh);
+    } else if (mode === 'blur') {
+      const tmp = getCanvas('fx', bw, bh);
+      tmp.ctx.clearRect(0, 0, bw, bh);
+      tmp.ctx.drawImage(ctx.canvas, x0, y0, bw, bh, 0, 0, bw, bh);
+      const r = Math.max(4, (rx * 2) / (16 - s.strength));
+      ctx.filter = `blur(${r}px)`;
+      ctx.drawImage(tmp.canvas, x0, y0);
+      ctx.drawImage(tmp.canvas, x0, y0); // second pass: stronger, fewer ringing artefacts
+      ctx.filter = 'none';
+    } else {
+      // mosaic: strength 1..10 → 13..4 blocks across the face (fewer = stronger)
+      const blocks = Math.max(3, 14 - s.strength);
+      const bs = Math.max(2, (rx * 2) / blocks);
+      const sw = Math.max(1, Math.round(bw / bs)), sh = Math.max(1, Math.round(bh / bs));
+      // average in two steps so every block is a true mean, not a single sample
+      const midW = Math.min(bw, sw * 8), midH = Math.min(bh, sh * 8);
+      const mid = getCanvas('fxmid', midW, midH);
+      mid.ctx.imageSmoothingEnabled = true; mid.ctx.imageSmoothingQuality = 'high';
+      mid.ctx.drawImage(ctx.canvas, x0, y0, bw, bh, 0, 0, midW, midH);
+      const small = getCanvas('fx', sw, sh);
+      small.ctx.imageSmoothingEnabled = true; small.ctx.imageSmoothingQuality = 'high';
+      small.ctx.drawImage(mid.canvas, 0, 0, midW, midH, 0, 0, sw, sh);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(small.canvas, 0, 0, sw, sh, x0, y0, bw, bh);
+      ctx.imageSmoothingEnabled = true;
+    }
+    ctx.restore();
+  }
+}
+
+/* ============================================================
+   export
+   ============================================================ */
+function exportList() {
+  const s = settings();
+  return state.photos.filter(p => p.status === 'done' && (s.exportAll || p.faces.some(f => f.blur)));
+}
+function renderExportSummary() {
+  const list = exportList();
+  const f = list.reduce((n, p) => n + p.faces.filter(x => x.blur).length, 0);
+  const pb = list.filter(p => p.faces.some(x => x.blur)).length;
+  $('#ex-summary').innerHTML = t('sum', list.length, f, pb);
+  const pending = state.photos.filter(p => p.status === 'pending' || p.status === 'busy').length;
+  const errs = state.photos.filter(p => p.status === 'error').length;
+  const warns = [];
+  if (pending) warns.push(t('warn_pending', pending));
+  if (errs) warns.push(t('warn_err', errs));
+  if (settings().mode === 'blur') warns.push(t('warn_blur_mode'));
+  $('#ex-warn').innerHTML = warns.map(esc).join('<br>');
+  $('#btn-export-dir').disabled = !list.length || !!pending || !window.showDirectoryPicker;
+  $('#btn-export-zip').disabled = !list.length || !!pending;
+  if (!window.showDirectoryPicker) $('#btn-export-dir').classList.add('hidden');
+}
+function setExStatus(type, text) {
+  $('#ex-status').className = 'status-bar ' + type;
+  $('#ex-status-text').textContent = text;
+}
+function outName(name, used) {
+  let base = name.replace(/\.[^.]+$/, '');
+  let n = base + '.jpg', i = 2;
+  while (used.has(n.toLowerCase())) n = `${base}-${i++}.jpg`;
+  used.add(n.toLowerCase());
+  return n;
+}
+async function renderFull(p, s) {
+  const bmp = await decode(files.get(p.id));
+  const c = getCanvas('export', bmp.width, bmp.height);
+  c.ctx.drawImage(bmp, 0, 0);
+  bmp.close && bmp.close();
+  applyEffects(c.ctx, p.faces.filter(f => f.blur), c.canvas.width, c.canvas.height, s);
+  // canvas re-encode = no EXIF/GPS/XMP metadata in the output
+  const blob = await new Promise(r => c.canvas.toBlob(r, 'image/jpeg', s.jpegQ));
+  if (!blob) throw new Error('encode failed: ' + p.name);
+  return blob;
+}
+function stamp() { const d = new Date(); const z = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; }
+let exporting = false;
+async function exportTo(target) {
+  if (exporting) return;
+  const s = settings();
+  const list = exportList();
+  if (!list.length) return;
+  let dir = null;
+  if (target === 'dir') {
+    try {
+      const root = await window.showDirectoryPicker({ mode: 'readwrite', id: 'fv-export' });
+      // always write into a fresh subfolder: originals can never be overwritten
+      let name = `vervaagd-${stamp()}`, i = 2;
+      while (true) {
+        try { await root.getDirectoryHandle(name); name = `vervaagd-${stamp()}-${i++}`; }
+        catch (e) { break; }
+      }
+      dir = await root.getDirectoryHandle(name, { create: true });
+    } catch (e) { if (e.name !== 'AbortError') setExStatus('error', t('ex_fail') + e.message); return; }
+  }
+  exporting = true;
+  $('#btn-export-dir').disabled = $('#btn-export-zip').disabled = true;
+  const used = new Set();
+  const zipParts = [];
+  try {
+    for (let i = 0; i < list.length; i++) {
+      setExStatus('working', t('ex_busy', i + 1, list.length));
+      $('#progress-bar').style.width = `${(i / list.length) * 100}%`;
+      const blob = await renderFull(list[i], s);
+      const name = outName(list[i].name, used);
+      if (dir) {
+        const fh = await dir.getFileHandle(name, { create: true });
+        const w = await fh.createWritable(); await w.write(blob); await w.close();
+      } else {
+        zipParts.push({ name, data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      await nextFrame();
+    }
+    if (dir) setExStatus('success', t('ex_done_dir', list.length, dir.name));
+    else {
+      const zip = buildZip(zipParts);
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(zip), download: `vervaagd-${stamp()}.zip` });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      setExStatus('success', t('ex_done_zip', list.length));
+    }
+    state.dirty = false;
+  } catch (e) {
+    console.error(e); setExStatus('error', t('ex_fail') + (e.message || e));
+  } finally {
+    exporting = false; $('#progress-bar').style.width = '0'; renderExportSummary();
+  }
+}
+
+/* ---------- minimal STORE zip (JPEGs are already compressed) ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let j = 0; j < 8; j++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[i] = c; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function buildZip(entries) {
+  const enc = new TextEncoder(); const parts = [], cds = []; let off = 0;
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const { name, data } of entries) {
+    const nb = enc.encode(name), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nb.length, true);
+    parts.push(new Uint8Array(lh.buffer), nb, data);
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
+    cd.setUint16(12, dosTime, true); cd.setUint16(14, dosDate, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, data.length, true); cd.setUint32(24, data.length, true); cd.setUint16(28, nb.length, true);
+    cd.setUint32(42, off, true);
+    cds.push(new Uint8Array(cd.buffer), nb);
+    off += 30 + nb.length + data.length;
+  }
+  const cdSize = cds.reduce((n, c) => n + c.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, entries.length, true); e.setUint16(10, entries.length, true);
+  e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...cds, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+
+/* ---------- export preview ---------- */
+let pvIndex = -1;
+async function renderExportPreview(advance = false) {
+  const withBlur = state.photos.map((p, i) => ({ p, i })).filter(x => x.p.status === 'done' && x.p.faces.some(f => f.blur));
+  const box = $('#ex-preview');
+  $('#btn-pv-next').disabled = withBlur.length < 2;
+  if (!withBlur.length) { box.innerHTML = `<span class="stage-msg">${t('pv_none')}</span>`; pvIndex = -1; return; }
+  let k = withBlur.findIndex(x => x.i === pvIndex);
+  if (k < 0) k = 0; else if (advance) k = (k + 1) % withBlur.length;
+  const { p, i } = withBlur[k]; pvIndex = i;
+  const img = await loadImg(p.previewUrl);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const full = getCanvas('expv', W, H);
+  full.ctx.drawImage(img, 0, 0);
+  const blurred = p.faces.filter(f => f.blur);
+  applyEffects(full.ctx, blurred, W, H, settings());
+  // zoom in on the blurred faces so the effect strength is actually visible
+  let x0 = Math.min(...blurred.map(f => f.x - f.w)), y0 = Math.min(...blurred.map(f => f.y - f.h));
+  let x1 = Math.max(...blurred.map(f => f.x + f.w * 2)), y1 = Math.max(...blurred.map(f => f.y + f.h * 2));
+  const minSide = 0.35;
+  if (x1 - x0 < minSide) { const c = (x0 + x1) / 2; x0 = c - minSide / 2; x1 = c + minSide / 2; }
+  if (y1 - y0 < minSide) { const c = (y0 + y1) / 2; y0 = c - minSide / 2; y1 = c + minSide / 2; }
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(1, x1); y1 = Math.min(1, y1);
+  const cw = Math.round((x1 - x0) * W), ch = Math.round((y1 - y0) * H);
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  c.getContext('2d').drawImage(full.canvas, x0 * W, y0 * H, cw, ch, 0, 0, cw, ch);
+  box.innerHTML = ''; box.appendChild(c);
+  box.title = p.name;
+}
+
+/* ============================================================
+   session save / load (coordinates + choices only, no images)
+   ============================================================ */
+function sessionJson() {
+  const s = settings();
+  return JSON.stringify({
+    app: 'gezichten-vervagen', version: state.version, savedAt: new Date().toISOString(),
+    settings: { quality: s.quality, minScore: s.minScore, mode: s.mode, strength: s.strength, pad: s.pad, jpegQ: s.jpegQ, exportAll: s.exportAll },
+    photos: state.photos.filter(p => p.status === 'done').map(p => ({
+      name: p.name, size: p.size, lastModified: p.lastModified, w: p.w, h: p.h,
+      faces: p.faces.map(f => ({ x: +f.x.toFixed(5), y: +f.y.toFixed(5), w: +f.w.toFixed(5), h: +f.h.toFixed(5), score: +f.score.toFixed(3), source: f.source, blur: f.blur })),
+    })),
+  }, null, 1);
+}
+async function saveSession() {
+  const json = sessionJson(), filename = `vervaag-sessie-${stamp()}.json`;
+  try {
+    if (window.showSaveFilePicker) {
+      const h = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+      const w = await h.createWritable(); await w.write(json); await w.close();
+    } else {
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([json], { type: 'application/json' })), download: filename });
+      a.click(); URL.revokeObjectURL(a.href);
+    }
+    state.dirty = false; toast(t('t_saved'), 'ok');
+  } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'err'); }
+}
+function loadSession(text) {
+  let data;
+  try { data = JSON.parse(text); if (data.app !== 'gezichten-vervagen' || !Array.isArray(data.photos)) throw 0; }
+  catch (e) { toast(t('t_session_bad'), 'err'); return; }
+  const st = data.settings || {};
+  if (st.quality) $('#set-quality').value = st.quality;
+  if (st.minScore) $('#set-score').value = st.minScore;
+  if (st.mode) { const r = $(`#ex-mode input[value="${st.mode}"]`); if (r) r.checked = true; }
+  if (st.strength) $('#ex-strength').value = st.strength;
+  if (st.pad) $('#ex-pad').value = st.pad;
+  if (st.jpegQ) $('#ex-quality').value = st.jpegQ;
+  if (typeof st.exportAll === 'boolean') $('#ex-all').checked = st.exportAll;
+  updateRangeLabels();
+  pendingSession = { photos: data.photos, matched: 0 };
+  // photos already loaded? re-apply now and regenerate their face crops
+  let applied = 0;
+  for (const p of state.photos) {
+    const saved = takeSavedFaces(p);
+    if (!saved) continue;
+    p.faces = saved; p.restored = true; p.status = 'pending'; applied++;
+  }
+  if (applied) { renderGrid(); renderStrip(); recalc(); processQueue(); }
+  else toast(t('t_session_pending'), 'info', 5000);
+}
+
+/* ============================================================
+   navigation
+   ============================================================ */
+function goStep(step) {
+  $$('.step-btn').forEach(b => b.classList.toggle('active', b.dataset.step === step));
+  $$('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + step));
+  if (step === 'export') { renderExportSummary(); renderExportPreview(); }
+  if (step === 'review' && state.view === 'photo') renderStage();
+}
+function setView(v) {
+  state.view = v;
+  $$('.seg button[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === v));
+  $('#view-photo').classList.toggle('active', v === 'photo');
+  applyFilterVisibility();
+  $('#grid-filters').classList.toggle('hidden', v !== 'grid');
+  $('#size-ctl').classList.toggle('hidden', v !== 'grid');
+  $('#hint-grid').classList.toggle('hidden', v !== 'grid');
+  $('#hint-photo').classList.toggle('hidden', v !== 'photo');
+  if (v === 'photo') renderStage();
+}
+function openPhoto(i, highlightFid) {
+  state.current = Math.max(0, Math.min(state.photos.length - 1, i));
+  setView('photo');
+  if (highlightFid) setTimeout(() => {
+    const b = document.querySelector(`.box[data-f="${highlightFid}"]`);
+    if (b) { b.classList.add('hl'); setTimeout(() => b.classList.remove('hl'), 1600); }
+  }, 80);
+}
+function updateRangeLabels() {
+  $('#set-score-val').textContent = parseFloat($('#set-score').value).toFixed(2);
+  $('#ex-strength-val').textContent = t('strength_lbl', $('#ex-strength').value);
+  $('#ex-pad-val').textContent = t('pad_lbl', parseFloat($('#ex-pad').value));
+  $('#ex-quality-val').textContent = t('q_lbl', parseFloat($('#ex-quality').value));
+}
+
+/* ============================================================
+   events
+   ============================================================ */
+$$('.step-btn').forEach(b => b.addEventListener('click', () => { if (!b.disabled) goStep(b.dataset.step); }));
+$$('.lang button').forEach(b => b.addEventListener('click', () => {
+  lang = b.dataset.lang; try { localStorage.setItem('fv-lang', lang); } catch (e) {}
+  applyLang();
+}));
+$('#btn-pick-files').addEventListener('click', () => $('#in-files').click());
+$('#btn-pick-dir').addEventListener('click', () => $('#in-dir').click());
+$('#btn-open-session').addEventListener('click', () => $('#in-session').click());
+$('#in-files').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+$('#in-dir').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+$('#in-session').addEventListener('change', async e => { const f = e.target.files[0]; if (f) loadSession(await f.text()); e.target.value = ''; });
+$('#set-score').addEventListener('input', updateRangeLabels);
+['#ex-strength', '#ex-pad', '#ex-quality'].forEach(s => $(s).addEventListener('input', () => { updateRangeLabels(); }));
+['#ex-strength', '#ex-pad'].forEach(s => $(s).addEventListener('change', () => renderExportPreview()));
+$$('#ex-mode input').forEach(r => r.addEventListener('change', () => { renderExportSummary(); renderExportPreview(); }));
+$('#ex-all').addEventListener('change', renderExportSummary);
+$('#btn-pv-next').addEventListener('click', () => renderExportPreview(true));
+$('#btn-export-dir').addEventListener('click', () => exportTo('dir'));
+$('#btn-export-zip').addEventListener('click', () => exportTo('zip'));
+$('#btn-save-session').addEventListener('click', saveSession);
+$('#btn-to-export').addEventListener('click', () => goStep('export'));
+
+// drop zone (and dropping anywhere on the page)
+const dz = $('#drop-zone');
+document.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) dz.classList.remove('drag-over'); });
+document.addEventListener('drop', async e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  if (!modelReady) return;
+  const list = await filesFromDataTransfer(e.dataTransfer);
+  const session = list.find(f => /\.json$/i.test(f.name));
+  if (session) loadSession(await session.text());
+  const imgs = list.filter(f => !/\.json$/i.test(f.name));
+  if (imgs.length) addFiles(imgs);
+});
+
+// review toolbar
+$$('.seg button[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+$$('#grid-filters .chip').forEach(c => c.addEventListener('click', () => {
+  state.filter = c.dataset.filter;
+  $$('#grid-filters .chip').forEach(x => x.setAttribute('aria-pressed', x === c));
+  applyFilterVisibility();
+}));
+$('#thumb-size').addEventListener('input', e => document.documentElement.style.setProperty('--thumb', e.target.value + 'px'));
+
+// grid clicks (delegated)
+$('#view-grid').addEventListener('click', e => {
+  const open = e.target.closest('[data-open]');
+  if (open) { openPhoto(state.photos.findIndex(p => p.id === open.dataset.open)); return; }
+  const card = e.target.closest('.face');
+  if (!card) return;
+  const { p, f } = findFace(card.dataset.p, card.dataset.f);
+  if (!f) return;
+  if (e.altKey) { openPhoto(state.photos.indexOf(p), f.id); return; }
+  toggleFace(p, f);
+});
+
+// photo view
+$('#strip').addEventListener('click', e => { const it = e.target.closest('.strip-item'); if (it) { state.current = +it.dataset.i; renderStage(); } });
+$('#btn-prev').addEventListener('click', () => { if (state.current > 0) { state.current--; renderStage(); } });
+$('#btn-next').addEventListener('click', () => { if (state.current < state.photos.length - 1) { state.current++; renderStage(); } });
+$('#btn-preview').addEventListener('click', () => { state.previewMode = !state.previewMode; updatePreviewBtn(); renderStage(); });
+function bulk(val) {
+  const p = curPhoto(); if (!p) return;
+  p.faces.forEach(f => setBlur(p, f, val));
+  recalc(); if (state.filter !== 'all') applyFilterVisibility();
+  if (state.previewMode) renderStage();
+}
+$('#btn-all-blur').addEventListener('click', () => bulk(true));
+$('#btn-none-blur').addEventListener('click', () => bulk(false));
+
+document.addEventListener('keydown', e => {
+  if (!$('#screen-review').classList.contains('active') || state.view !== 'photo') return;
+  if (e.target.matches('input, select, textarea')) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); $('#btn-prev').click(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); $('#btn-next').click(); }
+  else if (e.key.toLowerCase() === 'v') { $('#btn-preview').click(); }
+});
+
+// stage: click box = toggle, × = delete, drag on empty area = new manual box
+let drag = null;
+$('#stage').addEventListener('pointerdown', e => {
+  const wrap = e.target.closest('#photo-wrap');
+  if (!wrap || state.previewMode || e.button !== 0) return;
+  const p = curPhoto(); if (!p) return;
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    e.stopPropagation();
+    p.faces = p.faces.filter(f => f.id !== del.dataset.del);
+    state.dirty = true;
+    renderStage(); renderSection(p); renderStripItem(p); recalc();
+    return;
+  }
+  const box = e.target.closest('.box');
+  if (box) { const f = p.faces.find(x => x.id === box.dataset.f); if (f) toggleFace(p, f); return; }
+  const r = wrap.getBoundingClientRect();
+  drag = { wrap, r, x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height, el: document.createElement('div') };
+  drag.el.className = 'draft'; wrap.appendChild(drag.el);
+  wrap.setPointerCapture(e.pointerId);
+});
+$('#stage').addEventListener('pointermove', e => {
+  if (!drag) return;
+  const x = Math.max(0, Math.min(1, (e.clientX - drag.r.left) / drag.r.width));
+  const y = Math.max(0, Math.min(1, (e.clientY - drag.r.top) / drag.r.height));
+  Object.assign(drag, { x1: x, y1: y });
+  const l = Math.min(drag.x0, x), tp = Math.min(drag.y0, y);
+  Object.assign(drag.el.style, { left: l * 100 + '%', top: tp * 100 + '%', width: Math.abs(x - drag.x0) * 100 + '%', height: Math.abs(y - drag.y0) * 100 + '%' });
+});
+$('#stage').addEventListener('pointerup', async e => {
+  if (!drag) return;
+  const d = drag; drag = null; d.el.remove();
+  if (d.x1 === undefined) return;
+  const p = curPhoto(); if (!p) return;
+  const f = { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+  if (f.w * d.r.width < 8 || f.h * d.r.height < 8) { toast(t('t_small_box'), 'info', 2000); return; }
+  const face = { id: uid('f'), ...f, score: 1, source: 'manual', blur: true, thumbUrl: '' };
+  p.faces.push(face);
+  state.dirty = true;
+  // show the box right away; the grid crop follows when it's ready
+  const wrap = $('#photo-wrap');
+  if (wrap) wrap.insertAdjacentHTML('beforeend', boxHtml(face));
+  renderStripItem(p); recalc();
+  const img = await loadImg(p.previewUrl);
+  face.thumbUrl = await cropThumb(img, img.naturalWidth, img.naturalHeight, face);
+  renderSection(p);
+});
+
+window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefault(); e.returnValue = t('unsaved'); } });
+
+/* ============================================================
+   boot
+   ============================================================ */
+$('#foot-brand').textContent = CONFIG.brand;
+applyLang();
+setView('grid');
+setTimeout(initModel, 30);
+</script>
+</body>
+</html>
