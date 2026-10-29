@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Security policy: this page may not contact ANY server (connect-src 'none').
+     Scripts are pinned by hash, so injected scripts cannot run either.
+     Filled in by build.py; the same policy applies to the hosted and the portable copy. -->
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0d1424">
 <title>Gezichten Vervagen</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1424'/%3E%3Cg fill='%2306b6d4'%3E%3Crect x='8' y='8' width='5' height='5'/%3E%3Crect x='19' y='8' width='5' height='5' opacity='.6'/%3E%3Crect x='13.5' y='13.5' width='5' height='5' opacity='.8'/%3E%3Crect x='8' y='19' width='5' height='5' opacity='.5'/%3E%3Crect x='19' y='19' width='5' height='5'/%3E%3C/g%3E%3C/svg%3E">
 <style>
@@ -277,6 +283,18 @@ input[type=range] { accent-color: var(--accent); }
 .preview-note { font-size: .74rem; color: var(--dim); margin-top: .5rem; }
 .warn-list { margin-top: .6rem; font-size: .78rem; color: var(--warn); }
 
+/* ---------- notices ---------- */
+.notice {
+  margin-top: 1rem; padding: .8rem 1rem; border-radius: var(--radius); font-size: .8rem;
+  border: 1px solid var(--border2); background: rgba(6,182,212,.06); color: #a5e9f5;
+}
+.notice b { color: #d5f6fc; }
+.notice.warn { border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.06); color: #fcd9a0; }
+.notice.warn b { color: #fde7c2; }
+footer a { color: var(--sub); text-decoration: none; }
+footer a:hover { color: var(--accent); }
+#btn-install { white-space: nowrap; }
+
 /* ---------- toasts ---------- */
 #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 99; pointer-events: none; }
 .toast { padding: .6rem 1rem; border-radius: 9px; font-size: .8rem; font-weight: 600; color: #fff; max-width: 360px; pointer-events: auto;
@@ -315,6 +333,7 @@ footer .r { margin-left: auto; }
     <span><b id="st-faces">0</b> <span data-i18n="st_faces">gezichten</span></span>
     <span class="s-blur"><b id="st-blur">0</b> <span data-i18n="st_blur">vervaagd</span></span>
   </div>
+  <button class="btn sm hidden" id="btn-install" data-i18n="btn_install">Installeren als app</button>
   <div class="lang" role="group" aria-label="Taal / Language">
     <button data-lang="nl" aria-pressed="true">NL</button>
     <button data-lang="en" aria-pressed="false">EN</button>
@@ -343,6 +362,9 @@ footer .r { margin-left: auto; }
         <input type="file" id="in-session" accept=".json,application/json" hidden>
         <div class="model-status"><span class="dot pulse" id="model-dot"></span><span id="model-text" data-i18n="model_loading">Detectiemodel laden…</span></div>
       </div>
+
+      <div class="notice hidden" id="notice-browser" data-i18n-html="notice_browser"></div>
+      <div class="notice warn hidden" id="notice-cpu" data-i18n-html="notice_cpu"></div>
 
       <div class="settings-row">
         <div class="field">
@@ -476,8 +498,9 @@ footer .r { margin-left: auto; }
 </main>
 
 <footer>
+  <span id="foot-version" class="mono"></span>
   <span id="foot-backend" class="mono"></span>
-  <span class="r" id="foot-brand"></span>
+  <span class="r"><span id="foot-brand"></span> · <a id="foot-about" target="_blank" rel="noopener noreferrer" data-i18n="about">Over deze tool ↗</a></span>
 </footer>
 <div id="toasts"></div>
 
@@ -492,7 +515,10 @@ footer .r { margin-left: auto; }
    CONFIG — tweak here, no need to touch the rest
    ============================================================ */
 const CONFIG = {
+  version: '__VERSION__',   // filled in by build.py
+  homepage: '__BASE_URL__', // filled in by build.py
   brand: 'Homegrown IT Consulting · doon deit lehren',
+  zipPartBytes: 400 * 1024 * 1024, // ZIP export is split into parts of at most this size
   previewMaxSide: 1800,     // px, review/preview image
   thumbSize: 160,           // px, face crop resolution
   thumbPad: 0.45,           // context around face in crops
@@ -571,6 +597,12 @@ const I18N = {
     unsaved: 'Je hebt keuzes die nog niet geëxporteerd of opgeslagen zijn.',
     strength_lbl: v => `${v}/10`, pad_lbl: v => `${Math.round((v - 1) * 100)}%`, q_lbl: v => `${Math.round(v * 100)}`,
     of: 'van', prev: 'Vorige', next: 'Volgende',
+    notice_browser: mb => `<b>Deze browser kan niet "Opslaan in map".</b> De tool werkt gewoon; je export komt als ZIP-download (grote sets in delen van max. ${mb} MB). Voor de beste ervaring gebruik je Chrome of Edge.`,
+    notice_cpu: '<b>Geen grafische versnelling beschikbaar.</b> Gezichten zoeken werkt, maar duurt veel langer. Zet hardwareversnelling aan in je browserinstellingen, of probeer Chrome of Edge.',
+    btn_install: 'Installeren als app', t_installed: 'Geïnstalleerd als app',
+    about: 'Over deze tool ↗', version: v => `versie ${v}`,
+    ex_done_zip_parts: (n, k) => `${n} foto's gedownload in ${k} ZIP-bestanden`,
+    zip_base: 'vervaagd', zip_part: 'deel',
   },
   en: {
     app_name: 'Face Blur Review', app_sub: 'offline · nothing leaves this computer',
@@ -633,6 +665,12 @@ const I18N = {
     unsaved: 'You have choices that have not been exported or saved yet.',
     strength_lbl: v => `${v}/10`, pad_lbl: v => `${Math.round((v - 1) * 100)}%`, q_lbl: v => `${Math.round(v * 100)}`,
     of: 'of', prev: 'Previous', next: 'Next',
+    notice_browser: mb => `<b>This browser cannot "Save to folder".</b> The tool works fine; your export arrives as a ZIP download (large sets in parts of max. ${mb} MB). For the best experience, use Chrome or Edge.`,
+    notice_cpu: '<b>No graphics acceleration available.</b> Finding faces works but takes much longer. Turn on hardware acceleration in your browser settings, or try Chrome or Edge.',
+    btn_install: 'Install as app', t_installed: 'Installed as app',
+    about: 'About this tool ↗', version: v => `version ${v}`,
+    ex_done_zip_parts: (n, k) => `${n} photos downloaded in ${k} ZIP files`,
+    zip_base: 'blurred', zip_part: 'part',
   },
 };
 let lang = 'nl';
@@ -646,6 +684,8 @@ function applyLang() {
   document.title = t('app_name');
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  $('#notice-browser').innerHTML = t('notice_browser', Math.round(CONFIG.zipPartBytes / 1048576));
+  $('#foot-version').textContent = t('version', CONFIG.version);
   document.querySelectorAll('.lang button').forEach(b => b.setAttribute('aria-pressed', b.dataset.lang === lang));
   updateModelStatus();
   updatePreviewBtn();
@@ -740,7 +780,8 @@ function updateModelStatus() {
   if (modelError) { dot.className = 'dot err'; txt.textContent = t('model_err') + ': ' + (modelError.message || modelError); }
   else if (modelReady) { dot.className = 'dot ok'; txt.textContent = t('model_ready') + ' · ' + t('backend', backendName); }
   else { dot.className = 'dot pulse'; txt.textContent = t('model_loading'); }
-  $('#foot-backend').textContent = modelReady ? t('backend', backendName) : '';
+  $('#foot-backend').textContent = modelReady ? '· ' + t('backend', backendName) : '';
+  $('#notice-cpu').classList.toggle('hidden', !(modelReady && backendName !== 'webgl'));
 }
 
 /* ============================================================
@@ -1227,9 +1268,9 @@ async function exportTo(target) {
     try {
       const root = await window.showDirectoryPicker({ mode: 'readwrite', id: 'fv-export' });
       // always write into a fresh subfolder: originals can never be overwritten
-      let name = `vervaagd-${stamp()}`, i = 2;
+      let name = `${t('zip_base')}-${stamp()}`, i = 2;
       while (true) {
-        try { await root.getDirectoryHandle(name); name = `vervaagd-${stamp()}-${i++}`; }
+        try { await root.getDirectoryHandle(name); name = `${t('zip_base')}-${stamp()}-${i++}`; }
         catch (e) { break; }
       }
       dir = await root.getDirectoryHandle(name, { create: true });
@@ -1238,7 +1279,7 @@ async function exportTo(target) {
   exporting = true;
   $('#btn-export-dir').disabled = $('#btn-export-zip').disabled = true;
   const used = new Set();
-  const zipParts = [];
+  const zip = dir ? null : zipWriter(`${t('zip_base')}-${stamp()}`);
   try {
     for (let i = 0; i < list.length; i++) {
       setExStatus('working', t('ex_busy', i + 1, list.length));
@@ -1249,17 +1290,14 @@ async function exportTo(target) {
         const fh = await dir.getFileHandle(name, { create: true });
         const w = await fh.createWritable(); await w.write(blob); await w.close();
       } else {
-        zipParts.push({ name, data: new Uint8Array(await blob.arrayBuffer()) });
+        await zip.add(name, blob);
       }
       await nextFrame();
     }
     if (dir) setExStatus('success', t('ex_done_dir', list.length, dir.name));
     else {
-      const zip = buildZip(zipParts);
-      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(zip), download: `vervaagd-${stamp()}.zip` });
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-      setExStatus('success', t('ex_done_zip', list.length));
+      const parts = await zip.finish();
+      setExStatus('success', parts > 1 ? t('ex_done_zip_parts', list.length, parts) : t('ex_done_zip', list.length));
     }
     state.dirty = false;
   } catch (e) {
@@ -1272,25 +1310,57 @@ async function exportTo(target) {
 /* ---------- minimal STORE zip (JPEGs are already compressed) ---------- */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let j = 0; j < 8; j++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[i] = c; } return t; })();
 function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function downloadBlob(blob, filename) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 120000);
+}
+// Streams photos into ZIP parts of at most CONFIG.zipPartBytes. Each photo is kept
+// as a Blob (browsers can keep large Blobs on disk), only read once for its CRC.
+// Part 1 is held back until we know whether a part 2 follows, so a small export
+// gets a plain name and a large one gets consistently numbered parts.
+function zipWriter(base) {
+  let entries = [], bytes = 0, partNo = 0, held = null;
+  const partName = n => `${base}-${t('zip_part')}${n}.zip`;
+  const flush = async () => {
+    if (!entries.length) return;
+    const blob = buildZip(entries); entries = []; bytes = 0; partNo++;
+    if (partNo === 1) { held = blob; return; }
+    if (held) { downloadBlob(held, partName(1)); held = null; await sleep(500); }
+    downloadBlob(blob, partName(partNo)); await sleep(500);
+  };
+  return {
+    async add(name, blob) {
+      if (entries.length && bytes + blob.size > CONFIG.zipPartBytes) await flush();
+      const crc = crc32(new Uint8Array(await blob.arrayBuffer()));
+      entries.push({ name, blob, crc, size: blob.size }); bytes += blob.size;
+    },
+    async finish() {
+      await flush();
+      if (held) downloadBlob(held, partNo === 1 ? `${base}.zip` : partName(1));
+      return partNo;
+    },
+  };
+}
 function buildZip(entries) {
   const enc = new TextEncoder(); const parts = [], cds = []; let off = 0;
   const d = new Date();
   const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
   const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
-  for (const { name, data } of entries) {
-    const nb = enc.encode(name), crc = crc32(data);
+  for (const { name, blob, crc, size } of entries) {
+    const nb = enc.encode(name);
     const lh = new DataView(new ArrayBuffer(30));
     lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
     lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
-    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nb.length, true);
-    parts.push(new Uint8Array(lh.buffer), nb, data);
+    lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true); lh.setUint16(26, nb.length, true);
+    parts.push(new Uint8Array(lh.buffer), nb, blob);
     const cd = new DataView(new ArrayBuffer(46));
     cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
     cd.setUint16(12, dosTime, true); cd.setUint16(14, dosDate, true);
-    cd.setUint32(16, crc, true); cd.setUint32(20, data.length, true); cd.setUint32(24, data.length, true); cd.setUint16(28, nb.length, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, size, true); cd.setUint32(24, size, true); cd.setUint16(28, nb.length, true);
     cd.setUint32(42, off, true);
     cds.push(new Uint8Array(cd.buffer), nb);
-    off += 30 + nb.length + data.length;
+    off += 30 + nb.length + size;
   }
   const cdSize = cds.reduce((n, c) => n + c.length, 0);
   const e = new DataView(new ArrayBuffer(22));
@@ -1335,7 +1405,7 @@ async function renderExportPreview(advance = false) {
 function sessionJson() {
   const s = settings();
   return JSON.stringify({
-    app: 'gezichten-vervagen', version: state.version, savedAt: new Date().toISOString(),
+    app: 'gezichten-vervagen', version: state.version, appVersion: CONFIG.version, savedAt: new Date().toISOString(),
     settings: { quality: s.quality, minScore: s.minScore, mode: s.mode, strength: s.strength, pad: s.pad, jpegQ: s.jpegQ, exportAll: s.exportAll },
     photos: state.photos.filter(p => p.status === 'done').map(p => ({
       name: p.name, size: p.size, lastModified: p.lastModified, w: p.w, h: p.h,
@@ -1567,6 +1637,33 @@ window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefau
    boot
    ============================================================ */
 $('#foot-brand').textContent = CONFIG.brand;
+$('#foot-about').href = CONFIG.homepage;
+$('#notice-browser').classList.toggle('hidden', !!window.showDirectoryPicker);
+
+/* install-as-app: only when served over HTTPS (or localhost while testing).
+   The portable copy (file://) never loads a manifest or service worker. */
+const HOSTED = location.protocol === 'https:' ||
+  (location.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname));
+let installEvt = null;
+if (HOSTED) {
+  document.head.insertAdjacentHTML('beforeend',
+    '<link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png">');
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(e => console.warn('service worker:', e));
+  }
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); installEvt = e; $('#btn-install').classList.remove('hidden');
+  });
+  window.addEventListener('appinstalled', () => {
+    installEvt = null; $('#btn-install').classList.add('hidden'); toast(t('t_installed'), 'ok');
+  });
+}
+$('#btn-install').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  try { await installEvt.userChoice; } catch (e) {}
+  installEvt = null; $('#btn-install').classList.add('hidden');
+});
 applyLang();
 setView('grid');
 setTimeout(initModel, 30);

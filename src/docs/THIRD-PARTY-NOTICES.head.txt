@@ -1,0 +1,34 @@
+THIRD-PARTY NOTICES — Gezichten Vervagen v{{VERSION}}
+==================================================================
+
+gezichten-vervagen.html contains the following third-party software and
+data, embedded unmodified. Only the face DETECTION model is included; no face
+recognition, landmark, age/gender or expression models are shipped.
+
+------------------------------------------------------------------
+1. @vladmandic/face-api 1.7.15
+   https://github.com/vladmandic/face-api
+   Licence: MIT (full text in section A)
+   Copyright (c) Vladimir Mandic
+
+2. face-api.js 0.22.2 (the project @vladmandic/face-api was forked from)
+   https://github.com/justadudewhohacks/face-api.js
+   Licence: MIT (full text in section A)
+   Copyright (c) 2018 Vincent Mühler
+
+3. TensorFlow.js 4.22.0 (bundled inside @vladmandic/face-api)
+   https://github.com/tensorflow/tfjs
+   Licence: Apache License 2.0 (full text in section B)
+   Copyright Google LLC and the TensorFlow.js authors
+
+4. SSD MobileNet v1 face detection model weights
+   (ssd_mobilenetv1_model, distributed with face-api.js / @vladmandic/face-api)
+   According to the face-api.js documentation, these weights were provided by
+   "yeephycho" (https://github.com/yeephycho/tensorflow-face-detection) and the
+   model was trained on the WIDER FACE dataset
+   (http://shuoyang1213.me/WIDERFACE/). See the documentation of those projects
+   for their terms.
+
+------------------------------------------------------------------
+A. MIT License (applies to items 1 and 2, with their copyright lines above)
+

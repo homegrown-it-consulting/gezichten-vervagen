@@ -1,0 +1,85 @@
+Gezichten Vervagen v0.9.0 — test report (2026-10-29 21:10)
+Chromium (Playwright, headless, SwiftShader WebGL)
+
+PASS  Caddy started
+PASS  Cloudflare Pages simulator started
+PASS  [caddy] /app/ served
+PASS  [caddy] /app/ bytes == checksum
+PASS  [caddy] /app/ CSP header = meta CSP + frame-ancestors  [default-src 'none'; script-src 'sha256-AWD3rzqMeM7ORcfsx2U4O]
+PASS  [caddy] /app/ no-cache
+PASS  [caddy] security headers
+PASS  [caddy] / download page strict CSP, no scripts
+PASS  [caddy] sw.js own CSP (connect-src 'self')  [default-src 'none'; connect-src 'self']
+PASS  [caddy] manifest content-type  [application/manifest+json]
+PASS  [caddy] ZIP served as attachment, bytes == checksum
+PASS  [caddy] SHA256SUMS.txt is text/plain
+PASS  [caddy] _headers not published  [404]
+PASS  [cf-pages] /app/ served
+PASS  [cf-pages] /app/ bytes == checksum
+PASS  [cf-pages] /app/ CSP header = meta CSP + frame-ancestors  [default-src 'none'; script-src 'sha256-AWD3rzqMeM7ORcfsx2U4O]
+PASS  [cf-pages] /app/ no-cache
+PASS  [cf-pages] security headers
+PASS  [cf-pages] / download page strict CSP, no scripts
+PASS  [cf-pages] sw.js own CSP (connect-src 'self')  [default-src 'none'; connect-src 'self']
+PASS  [cf-pages] manifest content-type  [application/manifest+json]
+PASS  [cf-pages] ZIP served as attachment, bytes == checksum
+PASS  [cf-pages] SHA256SUMS.txt is text/plain
+PASS  [cf-pages] _headers not published  [404]
+PASS  [caddy] model loads (hosted)
+PASS  [caddy] service worker controls the page
+PASS  [caddy] manifest parsed without errors  [[]]
+PASS  [caddy] installable (no installability errors)  [[]]
+PASS  [caddy] no unexpected CSP violations (hosted)  [script-src wasm-eval; script-src wasm-eval]
+PASS  [caddy] works offline after first visit
+PASS  [caddy] detection offline  [{'sample1.jpg': 3}]
+PASS  [caddy] download page: zero CSP violations
+PASS  [caddy] download page images load
+PASS  [caddy] download link targets the release ZIP  [download/gezichten-vervagen-v0.9.0.zip]
+PASS  [caddy] EN switch shows English
+PASS  [caddy] download page: no horizontal scroll at phone width
+PASS  [cf-pages] model loads (hosted)
+PASS  [cf-pages] service worker controls the page
+PASS  [cf-pages] manifest parsed without errors  [[]]
+PASS  [cf-pages] installable (no installability errors)  [[]]
+PASS  [cf-pages] no unexpected CSP violations (hosted)  [script-src wasm-eval; script-src wasm-eval]
+PASS  [cf-pages] works offline after first visit
+PASS  [cf-pages] detection offline  [{'sample1.jpg': 3}]
+PASS  [cf-pages] download page: zero CSP violations
+PASS  [cf-pages] download page images load
+PASS  [cf-pages] download link targets the release ZIP  [download/gezichten-vervagen-v0.9.0.zip]
+PASS  [cf-pages] EN switch shows English
+PASS  [cf-pages] download page: no horizontal scroll at phone width
+PASS  release ZIP integrity
+PASS  release ZIP contents  [LEESMIJ-README.txt, LICENSE.txt, SHA256SUMS.txt, THIRD-PARTY-NOTICES.txt, gezichten-vervagen.html]
+PASS  HTML in ZIP matches its SHA256SUMS
+PASS  HTML in ZIP == hosted app/index.html
+PASS  model loads under CSP (file://)  [Detectiemodel klaar · rekenen via GPU (WebGL)]
+PASS  footer shows version  [versie 0.9.0]
+PASS  no manifest/service worker on file://
+PASS  browser notice hidden in Chromium
+PASS  about link points to base URL
+PASS  detection sample1.jpg  [3 faces, expected 3]
+PASS  detection sample5.jpg  [5 faces, expected 5]
+PASS  detection sample6.jpg  [4 faces, expected 4]
+PASS  detection groep_klein.jpg  [87 faces, expected (80, 95)]
+PASS  detection gedraaid.jpg  [0 faces, expected 0]
+PASS  EXIF rotation applied  [1367x1920]
+PASS  single export ZIP name  [vervaagd-2026-10-29.zip]
+PASS  export ZIP valid  [5 files]
+PASS  exported photos carry no EXIF/GPS
+PASS  ZIP export splits into numbered parts  [vervaagd-2026-10-29-deel1.zip, vervaagd-2026-10-29-deel2.zip, vervaagd-2026-10-29-deel3.zip, vervaagd-2026-10-29-deel4.zip, vervaagd-2026-10-29-deel5.zip]
+PASS  split parts valid and complete  [5 photos in 5 parts]
+PASS  status reports parts  [5 foto's gedownload in 5 ZIP-bestanden]
+PASS  no unexpected CSP violations during normal use  [script-src wasm-eval]
+PASS  fetch/XHR to a server blocked  [{"fetch": "blocked", "ws": "opened", "beacon": "queued"}]
+PASS  beacon + image-pixel exfiltration blocked  [script-src wasm-eval; connect-src https://example.com/upload; connect-src wss://example.com/; connect-src https://example.com/b; img-src https://example.com/pixel.png?d=secret]
+PASS  WebSocket blocked  [opened]
+PASS  injected inline script does not run
+PASS  no page errors
+PASS  regression: × removes a box
+PASS  simulated non-Chromium: API removed
+PASS  browser notice shown  [Deze browser kan niet "Opslaan in map". De tool werkt gewoon; je expor]
+PASS  notice translated (EN)
+PASS  'save to folder' hidden, ZIP offered
+
+80/80 passed

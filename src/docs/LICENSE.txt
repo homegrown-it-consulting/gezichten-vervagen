@@ -1,0 +1,24 @@
+Gezichten Vervagen
+Copyright (c) {{YEAR}} Homegrown IT Consulting
+
+>>> PLACEHOLDER: the licence for this tool has not been chosen yet. <<<
+>>> Replace this file before or at the first public release.        <<<
+
+Until a licence is chosen:
+
+NL  Je mag deze tool kosteloos gebruiken, ook binnen je organisatie, en
+    ongewijzigde kopieën verspreiden. Alle overige rechten (zoals het
+    aanpassen van de code en het verspreiden van gewijzigde versies) zijn
+    voorbehouden.
+
+EN  You may use this tool free of charge, including within your
+    organisation, and distribute unmodified copies. All other rights
+    (such as modifying the code and distributing modified versions) are
+    reserved.
+
+The tool is provided "as is", without warranty of any kind. It is an aid for
+reviewing photos; the user remains responsible for checking the result and for
+complying with consent and privacy rules.
+
+Third-party components included in this tool keep their own licences; see
+THIRD-PARTY-NOTICES.txt.
