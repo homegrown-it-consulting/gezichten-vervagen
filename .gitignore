@@ -3,3 +3,6 @@ dist/
 __pycache__/
 *.pyc
 .DS_Store
+
+# validation photos: local only, never committed
+tests/data/
