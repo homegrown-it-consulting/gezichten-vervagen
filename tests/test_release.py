@@ -91,7 +91,7 @@ def test_portable(p):
     pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.goto(html.as_uri())
     check("model loads under CSP (file://)", wait_model(pg), pg.inner_text("#model-text"))
-    check("footer shows version", "0.9.0" in pg.inner_text("#foot-version"), pg.inner_text("#foot-version"))
+    check("footer shows version", "0.1.0" in pg.inner_text("#foot-version"), pg.inner_text("#foot-version"))
     check("no manifest/service worker on file://", pg.evaluate("!document.querySelector('link[rel=manifest]') && !HOSTED"))
     check("browser notice hidden in Chromium", pg.is_hidden("#notice-browser"))
     check("about link points to base URL", pg.get_attribute("#foot-about", "href").startswith("https://"))
