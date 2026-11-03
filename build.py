@@ -3,6 +3,9 @@
 
     python3 build.py [--base-url https://vervagen.example.nl/] [--out dist]
 
+The base URL can also come from the environment variable GV_BASE_URL
+(handy on Cloudflare Pages: change the domain without touching the build command).
+
 Output (dist/):
   site/                         web root, deploy as-is (Cloudflare Pages or Caddy)
     index.html                  download page (no scripts)
@@ -17,14 +20,17 @@ Output (dist/):
 The build is reproducible: same inputs -> byte-identical HTML and ZIP (so checksums are stable).
 Only the face DETECTOR is bundled; recognition models are deliberately never included.
 """
-import argparse, base64, hashlib, html, json, pathlib, re, shutil, sys, zipfile
+import argparse, base64, hashlib, html, json, os, pathlib, re, shutil, sys, zipfile
 from urllib.parse import urlparse
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC, VENDOR = ROOT / "src", ROOT / "vendor"
 PLACEHOLDER_URL = "https://JOUW-DOMEIN.example/"
 APP_FILE = "gezichten-vervagen.html"
-LICENSE_IS_PLACEHOLDER = "PLACEHOLDER" in (SRC / "docs/LICENSE.txt").read_text(encoding="utf-8")
+LICENSE_TEXT = (SRC / "docs/LICENSE.txt").read_text(encoding="utf-8")
+LICENSE_IS_PLACEHOLDER = "PLACEHOLDER" in LICENSE_TEXT
+_spdx = re.search(r"SPDX-License-Identifier:\s*(\S+)", LICENSE_TEXT)
+LICENSE_ID = _spdx.group(1) if _spdx else None
 
 
 def sha256(b: bytes) -> str:
@@ -196,7 +202,8 @@ def human(n):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base-url", default=PLACEHOLDER_URL, help="public URL of the download page (with trailing /)")
+    ap.add_argument("--base-url", default=os.environ.get("GV_BASE_URL") or PLACEHOLDER_URL,
+                    help="public URL of the download page (with trailing /); default: $GV_BASE_URL")
     ap.add_argument("--out", default=str(ROOT / "dist"))
     a = ap.parse_args()
     base_url = a.base_url if a.base_url.endswith("/") else a.base_url + "/"
@@ -269,7 +276,8 @@ def main():
     page = fill((SRC / "site/index.html").read_text(encoding="utf-8"), {
         **vals, "ZIP_NAME": zip_name, "ZIP_SIZE": human(len(zip_bytes)), "ZIP_SHA": zip_sha, "HTML_SHA": html_sha,
         "CHANGES_NL": li(changes_nl), "CHANGES_EN": li(changes_en),
-        "LICENSE_LABEL": "licentie / licence (nog te kiezen / to be decided)" if LICENSE_IS_PLACEHOLDER else "licentie / licence",
+        "LICENSE_LABEL": ("licentie / licence (nog te kiezen / to be decided)" if LICENSE_IS_PLACEHOLDER
+                          else f"licentie / licence: {LICENSE_ID}" if LICENSE_ID else "licentie / licence"),
     })
     (site / "index.html").write_text(page, encoding="utf-8")
     (site / "SHA256SUMS.txt").write_text(f"{zip_sha}  {zip_name}\n{html_sha}  {APP_FILE}\n", encoding="utf-8")

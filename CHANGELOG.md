@@ -11,6 +11,7 @@ download page and uses its date as the (reproducible) timestamp of the release Z
 - Grote exports in Firefox en Safari worden in ZIP-delen van max. 400 MB verdeeld.
 - Kaders verwijderen werkt nu ook met touch en met de Delete-toets.
 - Melding wanneer je browser niet "Opslaan in map" ondersteunt of geen grafische versnelling heeft.
+- Gepubliceerd onder de open source licentie EUPL-1.2.
 
 ### en
 - First public test version: use it online, install it as an app, or download and take it with you.
@@ -18,3 +19,4 @@ download page and uses its date as the (reproducible) timestamp of the release Z
 - Large exports in Firefox and Safari are split into ZIP parts of max. 400 MB.
 - Removing boxes now also works with touch and the Delete key.
 - Notice when your browser can't "Save to folder" or has no graphics acceleration.
+- Published under the open source licence EUPL-1.2.

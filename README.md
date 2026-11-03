@@ -14,7 +14,7 @@ build.py                  builds dist/ (reproducible)
 src/app.html              the tool (source)
 src/site/                 download page + service worker templates
 src/icons/                icons (make_icons.py regenerates the PNGs)
-src/docs/                 README, LICENSE (placeholder), third-party notices for the release ZIP
+src/docs/                 README, LICENSE, third-party notices for the release ZIP
 vendor/                   face-api.js + SSD MobileNet detector weights, licence texts (see SOURCES.md)
 tests/                    end-to-end tests, Cloudflare Pages simulator, validation photos
 docs/DEPLOY.md            hosting on Cloudflare Pages or Caddy, open points before going public
@@ -25,6 +25,9 @@ docs/TESTPLAN.md          manual cross-browser / cross-OS checklist
 python3 build.py --base-url https://your-address/
 python3 tests/test_release.py           # needs Python Playwright + Chromium; CADDY=/path/to/caddy
 ```
+
+Licence: **EUPL-1.2** (`LICENSE`); © 2026 Homegrown IT Consulting. Third-party components keep their own
+licences: see `vendor/face-api/SOURCES.md` and the generated `THIRD-PARTY-NOTICES.txt`.
 
 Status: **v0.1.0, test version.** See `docs/DEPLOY.md` §0 for what to settle before public release
 (address, licence, model licence check, manual tests).
