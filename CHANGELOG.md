@@ -3,7 +3,7 @@
 Format: one block per version, newest first. `build.py` reads the top block for the
 download page and uses its date as the (reproducible) timestamp of the release ZIP.
 
-## 0.9.0 — 2026-10-29
+## 0.1.0 — 2026-11-03
 
 ### nl
 - Eerste publieke testversie: online gebruiken, installeren als app, of downloaden en meenemen.

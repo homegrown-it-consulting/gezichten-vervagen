@@ -26,5 +26,5 @@ python3 build.py --base-url https://your-address/
 python3 tests/test_release.py           # needs Python Playwright + Chromium; CADDY=/path/to/caddy
 ```
 
-Status: **v0.9.0, test version.** See `docs/DEPLOY.md` §0 for what to settle before public release
+Status: **v0.1.0, test version.** See `docs/DEPLOY.md` §0 for what to settle before public release
 (address, licence, model licence check, manual tests).
