@@ -17,9 +17,13 @@ src/icons/                icons (make_icons.py regenerates the PNGs)
 src/docs/                 README, LICENSE, third-party notices for the release ZIP
 vendor/                   face-api.js + SSD MobileNet detector weights, licence texts (see SOURCES.md)
 tests/                    end-to-end tests, Cloudflare Pages simulator, validation photos
-docs/DEPLOY.md            hosting on Cloudflare Pages or Caddy, open points before going public
+.github/workflows/        release workflow (GitHub Releases + Cloudflare Pages)
+docs/DEPLOY.md            releasing and hosting (Cloudflare Pages or Caddy), open points before going public
 docs/TESTPLAN.md          manual cross-browser / cross-OS checklist
 ```
+
+Releases: push a tag `vX.Y.Z` (equal to `VERSION`); `.github/workflows/release.yml` builds once and publishes to
+GitHub Releases and Cloudflare Pages. Setup: `docs/DEPLOY.md` §2a.
 
 ```bash
 python3 build.py --base-url https://your-address/

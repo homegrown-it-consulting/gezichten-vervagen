@@ -4,7 +4,7 @@
 
 | # | Open point | Where |
 |---|---|---|
-| 1 | **Choose the site address**: `GV_BASE_URL` on Cloudflare Pages, or `python3 build.py --base-url https://<your-address>/` | README, download page, footer link and Caddyfile all use it |
+| 1 | **Choose the site address**: repository variable `GV_BASE_URL` (see §2a), or `python3 build.py --base-url https://<your-address>/` | README, download page, footer link and Caddyfile all use it |
 | 2 | **Make the GitHub repo public** (done: licence EUPL-1.2). The licence notice names the repo as the source location (EUPL Art. 3), so it must be publicly reachable once you distribute the tool | `src/docs/LICENSE.txt`, `src/app.html` |
 | 3 | **Check the model licence.** The detector weights were, according to the face-api.js documentation, provided by *yeephycho* and trained on WIDER FACE. The WIDER FACE dataset card lists **CC BY-NC-ND 4.0** (non-commercial). Whether that carries over to a trained model is a legal grey area. Because you distribute as a business, get this checked, or plan the switch to a detector with clear terms | `THIRD-PARTY-NOTICES.txt` item 4 |
 | 4 | Run the manual checklist in `docs/TESTPLAN.md` (Firefox, Safari, Windows, macOS, Linux) | |
@@ -21,45 +21,79 @@ You deploy `dist/site/` as-is. `dist/server/Caddyfile` is for Caddy.
 **The CSP script hashes in `_headers` and in the Caddyfile belong to this exact build.**
 Always deploy the site and the server config of the same build together. A mismatch makes the browser refuse to run the tool (blank page with CSP errors in the console).
 
-## 2a. Cloudflare Pages (Git integration)
+## 2a. GitHub Releases + Cloudflare Pages (recommended)
 
-Cloudflare builds the site itself on every push; `dist/` is not in Git.
+Releases are built **once**, by GitHub Actions (`.github/workflows/release.yml`), when you push a version tag:
 
-1. Dashboard → **Workers & Pages** → **Create application** → choose **Pages** (not Workers) → **Connect to Git** / *Import an existing Git repository* → `homegrown-it-consulting/gezichten-vervagen`.
-   If the form shows a **Deploy command** (`npx wrangler deploy`), you are in the *Workers* flow: go back and pick Pages.
-2. Build settings:
+```
+git tag v0.1.0  ──▶  GitHub Actions: build.py ──┬──▶ GitHub Release   (ZIP + SHA256SUMS.txt, provenance attestation)
+                                                 └──▶ Cloudflare Pages (dist/site; download button → release asset)
+```
 
-   | Field | Value |
-   |---|---|
-   | Production branch | `main` |
-   | Framework preset | `None` |
-   | Build command | `python3 build.py` |
-   | Build output directory | `dist/site` |
-   | Root directory | *(empty)* |
-   | Environment variable | `GV_BASE_URL` = `https://<project>.pages.dev/` (later your own domain) |
-   | Environment variable (optional) | `PYTHON_VERSION` = `3.13` (pins the version; the v3 build image has 3.13 by default) |
+Same bytes in both places, so the checksums on the download page always match the release. Pushing to `main`
+does **not** change the live site; only a tag does.
 
-   `build.py` uses only the Python standard library: no `pip install`, no `npm`.
-3. **Save and Deploy**. `_headers` is picked up automatically (Pages doesn't serve it publicly).
-4. Add the custom domain (**Custom domains** tab), then change `GV_BASE_URL` to it and **retry the deployment**:
-   the base URL is baked into the files at build time.
-   Set `GV_BASE_URL` for *Production*; preview builds (other branches) may keep the `pages.dev` value.
-5. The ZIP's checksum depends on the build machine's compression library, so Cloudflare's build may produce
-   a different ZIP checksum than your local build. The download page always shows the checksums of the build it
-   came from; the HTML checksum is the same everywhere.
-6. **Switch these off for this site/zone**, if they're on. Each one changes the HTML that's served, which conflicts with the strict security policy and/or the published checksum:
-   - Rocket Loader
-   - Email Address Obfuscation (Scrape Shield)
-   - Web Analytics *automatic* setup (JS snippet injection) and Zaraz
-   - Any HTML-rewriting Worker / Snippet on this hostname
-7. Check, after deploying:
+### One-time setup
+
+1. **Cloudflare: stop the automatic Git builds.** Your Pages project is connected to Git. That can't be switched to
+   direct upload, but automatic deployments can be turned off, after which Wrangler can deploy to it:
+   Workers & Pages → your project → **Settings → Build → Branch control** → turn off
+   *Enable automatic production branch deployments*, and set *Preview branch* to **None**.
+   (Environment variables you set in Cloudflare are no longer used; `GV_BASE_URL` moves to GitHub, step 3.)
+2. **Cloudflare API token:** My Profile → **API Tokens** → *Create Token* → *Create Custom Token*,
+   permission **Account · Cloudflare Pages · Edit**, limited to your account. Copy it.
+   Your **Account ID** is on the Workers & Pages overview page.
+3. **GitHub:** repository **Settings → Secrets and variables → Actions**:
+
+   | Kind | Name | Value |
+   |---|---|---|
+   | Secret | `CLOUDFLARE_API_TOKEN` | the token from step 2 |
+   | Secret | `CLOUDFLARE_ACCOUNT_ID` | your account ID |
+   | Variable | `CF_PAGES_PROJECT` | the Pages project name |
+   | Variable | `GV_BASE_URL` | `https://<project>.pages.dev/` (later your own domain) |
+
+4. **GitHub:** **Settings → General → Releases** → enable **immutable releases** (published assets and their tag can
+   then never be changed or moved). Do this before the first release.
+5. Make the repository **public** before the first release: downloads, attestations and the EUPL source notice all
+   point to it. (Build-provenance attestations on a *private* repository need a paid GitHub plan.)
+
+### Releasing
+
+1. Bump `VERSION` and add the matching block at the top of `CHANGELOG.md` (`### nl` / `### en`).
+2. Optional but recommended: `python3 build.py && python3 tests/test_release.py --quick`.
+3. Commit, then tag and push both:
    ```bash
-   curl -sI https://<address>/app/ | grep -i -E 'content-security|cache-control'
-   curl -s https://<address>/app/ | sha256sum          # must equal SHA256SUMS.txt
-   curl -sI https://<address>/download/<zip> | grep -i content-disposition
-   curl -sI https://<address>/app/manifest.webmanifest | grep -i content-type
+   git tag v0.1.0
+   git push github main v0.1.0
    ```
-   If the served `/app/` hash differs from `SHA256SUMS.txt`, something in Cloudflare is rewriting the page (see step 6).
+4. Watch **Actions → Release**. The workflow stops if the tag and `VERSION` differ or the variables are missing.
+   It publishes the release first, then the site, then compares the live `/app/` with the build.
+
+A mistake in a published release can't be fixed in place (immutable): release a new patch version instead.
+
+### Custom domain
+
+Add it in the Pages project (**Custom domains**), change the `GV_BASE_URL` variable, and release a new version
+(the address is written into the files at build time).
+
+### Cloudflare features to switch off
+
+Each of these changes the HTML that's served, which conflicts with the strict security policy and/or the published
+checksum. Switch them off for this site/zone if they're on:
+- Rocket Loader
+- Email Address Obfuscation (Scrape Shield)
+- Web Analytics *automatic* setup (JS snippet injection) and Zaraz
+- Any HTML-rewriting Worker / Snippet on this hostname
+
+### Manual checks after a release
+
+```bash
+curl -sI https://<address>/app/ | grep -i -E 'content-security|cache-control'
+curl -s https://<address>/app/ | sha256sum          # must equal SHA256SUMS.txt
+curl -sI https://<address>/app/manifest.webmanifest | grep -i content-type
+gh attestation verify gezichten-vervagen-v0.1.0.zip --repo homegrown-it-consulting/gezichten-vervagen
+```
+If the served `/app/` hash differs from `SHA256SUMS.txt`, something in Cloudflare is rewriting the page (see above).
 
 ## 2b. Caddy
 
@@ -70,14 +104,17 @@ Cloudflare builds the site itself on every push; `dist/` is not in Git.
 3. `caddy validate --config /etc/caddy/Caddyfile` then `systemctl reload caddy`.
 4. Run the same `curl` checks as above.
 
-If Cloudflare proxies a Caddy origin (orange cloud), the step 6 settings of 2a apply too.
+Without `--release-repo` / `GV_RELEASE_REPO`, the build hosts the ZIP itself under `/download/` (self-hosted mode).
+If Cloudflare proxies a Caddy origin (orange cloud), the features listed in 2a must be off there too.
 
 ## 3. Updating to a new version
 
-1. Bump `VERSION`, add a block at the top of `CHANGELOG.md` (same version, with date and `### nl` / `### en`).
-2. `python3 build.py --base-url …` and `python3 tests/test_release.py`.
-3. Deploy `dist/site/` (and, for Caddy, `dist/server/Caddyfile`). Old ZIPs can stay in `download/`.
-4. Installed apps pick up the new version the next time they're opened online. USB copies don't; their users compare the version in the footer with the download page.
+Cloudflare Pages + GitHub: follow *Releasing* in §2a.
+Caddy: bump `VERSION` + `CHANGELOG.md`, run `python3 build.py --base-url …` and the tests, then deploy `dist/site/`
+and `dist/server/Caddyfile` together. Old ZIPs can stay in `download/`.
+
+Installed apps pick up the new version the next time they're opened online. USB copies don't; their users compare
+the version in the footer with the download page.
 
 ## 4. What the headers do
 
@@ -87,7 +124,7 @@ If Cloudflare proxies a Caddy origin (orange cloud), the step 6 settings of 2a a
 | `/` | CSP without any script permission (the download page has no JavaScript) |
 | `/app/` | Same CSP as inside the HTML (`connect-src 'none'`), plus `frame-ancestors 'none'`; `no-cache` so updates arrive |
 | `/app/sw.js` | Its own CSP (`connect-src 'self'`): the service worker may only fetch the tool's own files |
-| `/download/*` | `Content-Disposition: attachment`, cached as immutable (file names are versioned) |
+| `/download/*` | Self-hosted mode only: `Content-Disposition: attachment`, cached as immutable (file names are versioned) |
 
 ## 5. Expected console messages
 

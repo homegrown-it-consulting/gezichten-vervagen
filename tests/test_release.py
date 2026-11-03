@@ -265,6 +265,14 @@ def test_hosted_browser(p, base, label):
     dp.screenshot(path=str(SHOTS / f"B-{label}-page-nl.png"), full_page=True)
     dp.goto(base + "/#en"); dp.wait_for_timeout(300)
     check(f"[{label}] EN switch shows English", dp.is_visible("main.en") and dp.is_hidden("main.nl"))
+    in_view = "(() => { const r = document.querySelector('%s').getBoundingClientRect(); return r.top < innerHeight && r.bottom > 0; })()"
+    dp.click('main.en a[href="#verify"]'); dp.wait_for_timeout(1200)  # page uses smooth scrolling
+    check(f"[{label}] EN 'verify your download' link stays English and scrolls to it",
+          dp.is_visible("main.en") and dp.is_hidden("main.nl") and dp.evaluate(in_view % "#verify"))
+    dp.goto(base + "/"); dp.wait_for_timeout(200)
+    dp.click('main.nl a[href="#controleren"]'); dp.wait_for_timeout(1200)
+    check(f"[{label}] NL 'controleer je download' link works", dp.is_visible("main.nl") and dp.evaluate(in_view % "#controleren"))
+    dp.goto(base + "/#en"); dp.wait_for_timeout(200)
     dp.screenshot(path=str(SHOTS / f"B-{label}-page-en.png"))
     dp.set_viewport_size({"width": 390, "height": 844}); dp.goto(base + "/"); dp.wait_for_timeout(300)
     no_hscroll = dp.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

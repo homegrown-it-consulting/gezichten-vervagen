@@ -3,19 +3,24 @@
 
     python3 build.py [--base-url https://vervagen.example.nl/] [--out dist]
 
-The base URL can also come from the environment variable GV_BASE_URL
-(handy on Cloudflare Pages: change the domain without touching the build command).
+The base URL can also come from the environment variable GV_BASE_URL.
+
+Release mode: with --release-repo OWNER/REPO (or $GV_RELEASE_REPO), the download page links
+to the GitHub Release asset instead of hosting the ZIP itself. The GitHub Actions workflow
+(.github/workflows/release.yml) builds once and publishes the SAME files to GitHub Releases
+and Cloudflare Pages, so the checksums on the page always match the release.
 
 Output (dist/):
   site/                         web root, deploy as-is (Cloudflare Pages or Caddy)
     index.html                  download page (no scripts)
     app/index.html              the tool  == the HTML inside the release ZIP (same bytes)
     app/sw.js, app/manifest.webmanifest, app/icons/*
-    download/gezichten-vervagen-vX.Y.Z.zip
+    download/gezichten-vervagen-vX.Y.Z.zip   (only without release mode)
     SHA256SUMS.txt, LICENSE.txt, THIRD-PARTY-NOTICES.txt
     _headers                    Cloudflare Pages header rules
   server/Caddyfile              Caddy site block with the same header rules
-  gezichten-vervagen-vX.Y.Z.zip copy of the release ZIP
+  release/                      GitHub Release assets: the ZIP + SHA256SUMS.txt
+  RELEASE_NOTES.md              release text (from CHANGELOG.md)
 
 The build is reproducible: same inputs -> byte-identical HTML and ZIP (so checksums are stable).
 Only the face DETECTOR is bundled; recognition models are deliberately never included.
@@ -26,6 +31,7 @@ from urllib.parse import urlparse
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC, VENDOR = ROOT / "src", ROOT / "vendor"
 PLACEHOLDER_URL = "https://JOUW-DOMEIN.example/"
+SOURCE_REPO = "homegrown-it-consulting/gezichten-vervagen"   # named in LICENSE.txt as the source location
 APP_FILE = "gezichten-vervagen.html"
 LICENSE_TEXT = (SRC / "docs/LICENSE.txt").read_text(encoding="utf-8")
 LICENSE_IS_PLACEHOLDER = "PLACEHOLDER" in LICENSE_TEXT
@@ -204,6 +210,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base-url", default=os.environ.get("GV_BASE_URL") or PLACEHOLDER_URL,
                     help="public URL of the download page (with trailing /); default: $GV_BASE_URL")
+    ap.add_argument("--release-repo", default=os.environ.get("GV_RELEASE_REPO", ""),
+                    help="OWNER/REPO: link downloads to that repo's GitHub Release; default: $GV_RELEASE_REPO")
     ap.add_argument("--out", default=str(ROOT / "dist"))
     a = ap.parse_args()
     base_url = a.base_url if a.base_url.endswith("/") else a.base_url + "/"
@@ -217,8 +225,11 @@ def main():
         shutil.rmtree(out)
     site = out / "site"
     (site / "app/icons").mkdir(parents=True)
-    (site / "download").mkdir()
     (out / "server").mkdir()
+    (out / "release").mkdir()
+    repo = a.release_repo.strip().strip("/")
+    if repo and not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        sys.exit(f"--release-repo must look like OWNER/REPO, got {repo!r}")
 
     # 1. the tool
     app_bytes, csp = build_app(version, base_url)
@@ -240,7 +251,7 @@ def main():
     # 3. release zip (reproducible)
     folder = f"gezichten-vervagen-v{version}"
     zip_name = f"{folder}.zip"
-    zip_path = site / "download" / zip_name
+    zip_path = out / "release" / zip_name
     deterministic_zip(zip_path, folder, {
         APP_FILE: app_bytes,
         "LEESMIJ-README.txt": readme.encode(),
@@ -250,7 +261,17 @@ def main():
     }, date)
     zip_bytes = zip_path.read_bytes()
     zip_sha = sha256(zip_bytes)
-    shutil.copy(zip_path, out / zip_name)
+    sums = f"{zip_sha}  {zip_name}\n{html_sha}  {APP_FILE}\n"
+    (out / "release/SHA256SUMS.txt").write_text(sums, encoding="utf-8")
+    tag = f"v{version}"
+    source_url = f"https://github.com/{repo or SOURCE_REPO}"
+    if repo:   # release mode: GitHub hosts the ZIP
+        download_href = f"https://github.com/{repo}/releases/download/{tag}/{zip_name}"
+        release_url = f"https://github.com/{repo}/releases/tag/{tag}"
+    else:      # self-hosted: the site carries its own copy
+        (site / "download").mkdir()
+        shutil.copy(zip_path, site / "download" / zip_name)
+        download_href, release_url = f"download/{zip_name}", None
 
     # 4. install-as-app files
     for f in (SRC / "icons").glob("*"):
@@ -278,13 +299,44 @@ def main():
         "CHANGES_NL": li(changes_nl), "CHANGES_EN": li(changes_en),
         "LICENSE_LABEL": ("licentie / licence (nog te kiezen / to be decided)" if LICENSE_IS_PLACEHOLDER
                           else f"licentie / licence: {LICENSE_ID}" if LICENSE_ID else "licentie / licence"),
+        "DOWNLOAD_HREF": html.escape(download_href),
+        "SOURCE_LINKS": (f'<a href="{source_url}">broncode / source</a>'
+                         + (f' · <a href="{release_url}">release {tag}</a>' if release_url else "")),
+        "VERIFY_EXTRA_NL": (f'\n      <p class="note">De ZIP staat op <a href="{release_url}">GitHub Releases</a>; GitHub toont daar dezelfde controlesom. '
+                            f'IT-beheerders kunnen ook de herkomst controleren: <code>gh attestation verify {zip_name} --repo {repo}</code></p>'
+                            if release_url else ""),
+        "VERIFY_EXTRA_EN": (f'\n      <p class="note">The ZIP is hosted on <a href="{release_url}">GitHub Releases</a>, which shows the same checksum. '
+                            f'IT administrators can also verify where it was built: <code>gh attestation verify {zip_name} --repo {repo}</code></p>'
+                            if release_url else ""),
     })
     (site / "index.html").write_text(page, encoding="utf-8")
-    (site / "SHA256SUMS.txt").write_text(f"{zip_sha}  {zip_name}\n{html_sha}  {APP_FILE}\n", encoding="utf-8")
+    (site / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
     (site / "LICENSE.txt").write_text(license_txt, encoding="utf-8")
     (site / "THIRD-PARTY-NOTICES.txt").write_text(notices, encoding="utf-8")
 
-    # 6. server configs
+    # 6. release notes (used by the GitHub Actions workflow)
+    bullets = lambda xs: "\n".join(f"- {x}" for x in xs)
+    (out / "RELEASE_NOTES.md").write_text(f"""## Nederlands
+
+{bullets(changes_nl)}
+
+## English
+
+{bullets(changes_en)}
+
+---
+
+**Download:** `{zip_name}` (Windows, macOS, Linux). Unzip it and double-click `gezichten-vervagen.html`; nothing to install.
+**Online / install as an app:** {base_url}
+
+SHA-256:
+```
+{sums.rstrip()}
+```
+Verify where it was built: `gh attestation verify {zip_name} --repo {repo or SOURCE_REPO}`
+""", encoding="utf-8")
+
+    # 7. server configs
     rules = header_rules(csp)
     (site / "_headers").write_text(render_cf_headers(rules, version), encoding="utf-8")
     (out / "server/Caddyfile").write_text(render_caddyfile(rules, version, host), encoding="utf-8")
@@ -296,6 +348,7 @@ def main():
         print("  ! LICENSE.txt is still the PLACEHOLDER text")
     print(f"  app      {human(len(app_bytes))}  sha256 {html_sha}")
     print(f"  zip      {human(len(zip_bytes))}  sha256 {zip_sha}  ({zip_name})")
+    print(f"  download {download_href}")
     print(f"  output   {out}")
 
 

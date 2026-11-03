@@ -1,0 +1,90 @@
+# Release Gezichten Vervagen
+#
+# Trigger: push a tag vX.Y.Z that equals the VERSION file (git tag v0.1.0 && git push github v0.1.0).
+# One build, two destinations, identical bytes:
+#   1. GitHub Release   (ZIP + SHA256SUMS.txt, with build-provenance attestation)
+#   2. Cloudflare Pages (dist/site; its download button links to the release asset)
+# The release is published before the site goes live, so the download link never 404s.
+#
+# Setup (once): see docs/DEPLOY.md §2a.
+#   Repository variables: GV_BASE_URL, CF_PAGES_PROJECT
+#   Repository secrets:   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write       # create the release
+  id-token: write       # sign the build-provenance attestation
+  attestations: write   # store it
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      GV_BASE_URL: ${{ vars.GV_BASE_URL }}
+      GV_RELEASE_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check tag, VERSION and settings
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match VERSION ($version). Bump VERSION and CHANGELOG.md, commit, then tag."; exit 1
+          fi
+          if [ -z "$GV_BASE_URL" ] || [ -z "${{ vars.CF_PAGES_PROJECT }}" ]; then
+            echo "::error::Set the repository variables GV_BASE_URL and CF_PAGES_PROJECT (Settings > Secrets and variables > Actions)."; exit 1
+          fi
+
+      - name: Build
+        run: python3 build.py
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/release/*.zip
+            dist/site/app/index.html
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # draft -> attach all assets -> publish: with immutable releases, assets are locked at publication
+          gh release create "$TAG" dist/release/* \
+            --draft --verify-tag \
+            --title "Gezichten Vervagen $TAG" \
+            --notes-file dist/RELEASE_NOTES.md
+          gh release edit "$TAG" --draft=false --latest
+
+      - name: Deploy site to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/site --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=main --commit-hash=${{ github.sha }}
+
+      - name: Check the live site
+        run: |
+          sleep 20
+          live="$(curl -fsSL "${GV_BASE_URL}app/" | sha256sum | cut -d' ' -f1)"
+          built="$(sha256sum dist/site/app/index.html | cut -d' ' -f1)"
+          echo "built $built"; echo "live  $live"
+          if [ "$live" != "$built" ]; then
+            echo "::warning::The live /app/ differs from this build. Either the CDN still serves the old version (re-check in a minute), or Cloudflare rewrites the HTML (see docs/DEPLOY.md, step 6)."
+          fi
+          curl -fsSI "https://github.com/${GV_RELEASE_REPO}/releases/download/${TAG}/gezichten-vervagen-${TAG}.zip" -o /dev/null \
+            && echo "release asset reachable"

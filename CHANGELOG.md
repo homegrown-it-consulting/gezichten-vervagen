@@ -12,6 +12,7 @@ download page and uses its date as the (reproducible) timestamp of the release Z
 - Kaders verwijderen werkt nu ook met touch en met de Delete-toets.
 - Melding wanneer je browser niet "Opslaan in map" ondersteunt of geen grafische versnelling heeft.
 - Gepubliceerd onder de open source licentie EUPL-1.2.
+- Downloads via GitHub Releases, met controleerbare herkomst.
 
 ### en
 - First public test version: use it online, install it as an app, or download and take it with you.
@@ -20,3 +21,4 @@ download page and uses its date as the (reproducible) timestamp of the release Z
 - Removing boxes now also works with touch and the Delete key.
 - Notice when your browser can't "Save to folder" or has no graphics acceleration.
 - Published under the open source licence EUPL-1.2.
+- Downloads via GitHub Releases, with verifiable build provenance.
